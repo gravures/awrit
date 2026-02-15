@@ -130,7 +130,7 @@ children.push([
     {
       stdio: ['inherit', 'inherit', 'inherit'],
       serialization: 'json',
-      ipc(message, subprocess) {
+      ipc(_message, _subprocess) {
         // TODO: do cool stuff with IPC between bun and the electron process
       },
       windowsHide: true,

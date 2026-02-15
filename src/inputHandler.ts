@@ -1,10 +1,25 @@
-import type { KeyEvent as KeyEventOriginal, TermEvent } from 'awrit-native-rs';
+import { getWindowSize, type KeyEvent as KeyEventOriginal, type TermEvent } from 'awrit-native-rs';
 import { handleEvent as handleKeyBinding } from './keybindings';
+import {
+  nextTmuxMouseCoordinateMode,
+  normalizeTmuxMouseCoordinates,
+  type MouseCoordinateMode,
+} from './tty/mouseCoordinates';
+import { isTmuxSession } from './tty/tmux';
 import { focusedView } from './windows';
 
 const WHEEL_DELTA = 100;
 
 const mouseEventTypes = ['mouseDown', 'mouseUp', 'mouseMove'] as const;
+const TERM_SIZE_CACHE_TTL_MS = 100;
+
+let mouseCoordinateMode: MouseCoordinateMode = 'unknown';
+let cachedTermSize:
+  | {
+      size: ReturnType<typeof getWindowSize>;
+      at: number;
+    }
+  | undefined;
 // this is a fix for Electron going back and forth on what's supported for modifiers, despite being case insensitive;
 type KeyEventModifiers = Lowercase<KeyEventOriginal['modifiers'][number]>[];
 type KeyEvent = Omit<KeyEventOriginal, 'modifiers'> & {
@@ -13,6 +28,23 @@ type KeyEvent = Omit<KeyEventOriginal, 'modifiers'> & {
 
 function isSimpleMouseEvent(kind: unknown): kind is (typeof mouseEventTypes)[number] {
   return mouseEventTypes.includes(kind as (typeof mouseEventTypes)[number]);
+}
+
+function getCachedTermSize(now = Date.now()) {
+  if (cachedTermSize && now - cachedTermSize.at < TERM_SIZE_CACHE_TTL_MS) {
+    return cachedTermSize.size;
+  }
+  const size = getWindowSize();
+  cachedTermSize = { size, at: now };
+  return size;
+}
+
+function maybeNormalizeTmuxMouseCoordinates(rawX: number, rawY: number) {
+  if (!isTmuxSession()) return { x: rawX, y: rawY };
+
+  const termSize = getCachedTermSize();
+  mouseCoordinateMode = nextTmuxMouseCoordinateMode(rawX, rawY, termSize, mouseCoordinateMode);
+  return normalizeTmuxMouseCoordinates(rawX, rawY, termSize, mouseCoordinateMode);
 }
 
 export function handleInput(evt: TermEvent) {
@@ -67,15 +99,18 @@ export function handleInput(evt: TermEvent) {
       const DPI_SCALE = view.layoutContainer.devicePixelRatio;
       const rawX = x ?? 0;
       const rawY = y ?? 0;
+      const normalized = maybeNormalizeTmuxMouseCoordinates(rawX, rawY);
+      const normalizedX = normalized.x;
+      const normalizedY = normalized.y;
 
       // Determine which region we're in based on layout
       const { toolbarNode, contentNode } = view;
-      const isInToolbar = rawY < contentNode.deviceLayout.y;
+      const isInToolbar = normalizedY < contentNode.deviceLayout.y;
 
       // Calculate position relative to the target component
-      const adjustedX = Math.floor(rawX / DPI_SCALE);
+      const adjustedX = Math.floor(normalizedX / DPI_SCALE);
       const adjustedY = Math.floor(
-        (rawY - (isInToolbar ? 0 : toolbarNode.deviceLayout.height)) / DPI_SCALE,
+        (normalizedY - (isInToolbar ? 0 : toolbarNode.deviceLayout.height)) / DPI_SCALE,
       );
 
       const focusedContent = isInToolbar ? view.toolbar.webContents : view.content.webContents;

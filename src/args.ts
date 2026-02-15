@@ -9,6 +9,12 @@ export const possibleOptions = {
   'no-paint': { short: 'n', description: 'Disable painting' },
   transparent: { short: 't', description: 'Make the window transparent' },
   'debug-paint': { short: 'p', description: 'Debug paint' },
+  'tmux-dump': { short: 'm', description: 'Dump tmux graphics and placeholder output to /tmp' },
+  'tmux-renderer': {
+    short: 'R',
+    description: 'Select tmux renderer backend: native or timg',
+    string: true,
+  },
   rebuild: { short: 'r', description: 'Rebuild the toolbar' },
 } as const;
 
@@ -27,16 +33,31 @@ export const options: {
 
 const supportedSchemes = ['http', 'https', 'file', 'data'];
 
-for (const arg of rawArgs) {
+for (let index = 0; index < rawArgs.length; index++) {
+  const arg = rawArgs[index];
   if (arg.startsWith('-')) {
-    const [rawKey, value] = arg.slice(arg.startsWith('--') ? 2 : 1).split('=');
+    const keyValue = arg.slice(arg.startsWith('--') ? 2 : 1);
+    const equalsIndex = keyValue.indexOf('=');
+    const rawKey = equalsIndex === -1 ? keyValue : keyValue.slice(0, equalsIndex);
+    let value = equalsIndex === -1 ? undefined : keyValue.slice(equalsIndex + 1);
 
     if (!(rawKey in possibleOptions) && !(rawKey in shortOptions)) {
       continue;
     }
 
     const key = shortOptions[rawKey as ShortOption] ?? rawKey;
-    options[key] = 'string' in possibleOptions[key] ? (value as any) : true;
+    if ('string' in possibleOptions[key]) {
+      if (value == null) {
+        const nextArg = rawArgs[index + 1];
+        if (nextArg != null && !nextArg.startsWith('-')) {
+          value = nextArg;
+          index++;
+        }
+      }
+      options[key] = value as any;
+    } else {
+      options[key] = true as any;
+    }
   } else {
     options.url = arg;
   }

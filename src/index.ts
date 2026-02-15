@@ -14,8 +14,11 @@ import { options } from './args';
 import { features } from './features';
 import { clearPlacements } from './tty/kittyGraphics';
 import { loadKeyBindings } from './keybindings';
+import { getForcedTmuxMouseCoordinateMode } from './tty/mouseCoordinates';
 import fs from 'node:fs';
 import path from 'node:path';
+import { closeTmuxRenderer } from './paint';
+import { allowPassthroughEnabled, getTmuxVersion, isTmuxSession, mouseEnabled } from './tty/tmux';
 
 let homepage = 'https://github.com/chase/awrit';
 
@@ -63,13 +66,12 @@ dialog.showErrorBox = (title, content) => {
 
 const INITIAL_URL = options.url || homepage;
 
-let exiting = false;
 let quitListening = () => {};
 
 const cleanup = (signum = 1, reason?: string) => {
-  exiting = true;
   quitListening();
   clearPlacements();
+  closeTmuxRenderer();
   out.cleanup();
   if (features.current) {
     termDisableFeatures(features.current);
@@ -106,11 +108,46 @@ function setup() {
   out.setup();
   features.current = termEnableFeatures();
   const { keyboard, images } = features.current;
-  if (!keyboard) {
-    cleanup(1, 'Extended keyboard support is required');
-  }
-  if (!images) {
-    cleanup(1, 'Basic Kitty graphics protocol support is required');
+  const tmux = isTmuxSession();
+  if (tmux) {
+    try {
+      const tmuxVersion = getTmuxVersion();
+      if (!allowPassthroughEnabled()) {
+        console_.error('tmux allow-passthrough is disabled. Set `set -gq allow-passthrough all`.');
+      }
+      if (!mouseEnabled()) {
+        console_.error('tmux mouse mode is disabled. Set `set -g mouse on` for pointer input.');
+      }
+      const forcedMouseCoords = process.env.AWRIT_TMUX_MOUSE_COORDS;
+      if (forcedMouseCoords && !getForcedTmuxMouseCoordinateMode(forcedMouseCoords)) {
+        console_.error(
+          `Invalid AWRIT_TMUX_MOUSE_COORDS="${forcedMouseCoords}". Expected "cell" or "pixel".`,
+        );
+      }
+      if (
+        tmuxVersion &&
+        (tmuxVersion.major < 3 || (tmuxVersion.major === 3 && tmuxVersion.minor < 4))
+      ) {
+        console_.error(
+          `tmux ${tmuxVersion.major}.${tmuxVersion.minor} detected. tmux >= 3.4 is recommended for reliable passthrough.`,
+        );
+      }
+    } catch (error) {
+      console_.error('Unable to read tmux capabilities:', error);
+    }
+    if (!keyboard) {
+      console_.error('Extended keyboard support unavailable in tmux; continuing without it.');
+    }
+    if (!images) {
+      console_.error('Kitty graphics detection failed in tmux; continuing with tmux placeholder mode.');
+    }
+  } else {
+    if (!keyboard) {
+      cleanup(1, 'Extended keyboard support is required');
+    }
+    if (!images) {
+      cleanup(1, 'Basic Kitty graphics protocol support is required');
+    }
   }
 
   quitListening = listenForInput(inputHandler, 200);

@@ -1,7 +1,7 @@
 /** Homepage
  * The page that's displayed by default when no URL is provided
  **/
-const homepage = 'https://github.com/chase/awrit';
+const homepage = "https://github.com/chase/awrit";
 
 /** Keybindings
  *
@@ -49,25 +49,29 @@ const homepage = 'https://github.com/chase/awrit';
  * }}
  */
 const keybindings = {
-  '<C-c>': () => {
-    process.emit('SIGINT');
+  "<C-c>": () => {
+    process.emit("SIGINT");
   },
-  '<Mouse4>': back,
-  '<Mouse5>': forward,
+  "<C-f>": scrollPageDown,
+  "<C-b>": scrollPageUp,
+  "<C-d>": scrollHalfPageDown,
+  "<C-u>": scrollHalfPageUp,
+  "<Mouse4>": back,
+  "<Mouse5>": forward,
   mac: {
-    '<M-a>': ({ view }) => {
+    "<M-a>": ({ view }) => {
       view.focusedContent.selectAll();
     },
-    '<M-]>': forward,
-    '<M-[>': back,
-    '<M-f>': find,
-    '<M-r>': refresh,
+    "<M-]>": forward,
+    "<M-[>": back,
+    "<M-f>": find,
+    "<M-r>": refresh,
   },
   linux: {
-    '<C-]>': forward,
-    '<C-[>': back,
-    '<C-f>': find,
-    '<C-r>': refresh,
+    "<C-]>": forward,
+    "<C-[>": back,
+    "</>": find,
+    "<C-r>": refresh,
   },
 };
 
@@ -87,10 +91,37 @@ function refresh({ view }) {
 }
 
 function find({ view }) {
-  view.toolbar.webContents.send('toolbar:toggle-find');
+  view.toolbar.webContents.send("toolbar:toggle-find");
   view.content.blurWebView();
   view.toolbar.focusOnWebView();
   view.focusedContent = view.toolbar.webContents;
+}
+
+/** @param {{ view?: import('./src/windows').WindowView }} ctx */
+function scrollByViewportFactor({ view }, factor) {
+  if (!view) return;
+  const script = `window.scrollBy({ top: window.innerHeight * ${factor}, left: 0, behavior: 'auto' });`;
+  void view.content.webContents.executeJavaScript(script).catch(() => {});
+}
+
+/** @type {KeyBindingAction} */
+function scrollPageDown(ctx) {
+  scrollByViewportFactor(ctx, 1);
+}
+
+/** @type {KeyBindingAction} */
+function scrollPageUp(ctx) {
+  scrollByViewportFactor(ctx, -1);
+}
+
+/** @type {KeyBindingAction} */
+function scrollHalfPageDown(ctx) {
+  scrollByViewportFactor(ctx, 0.5);
+}
+
+/** @type {KeyBindingAction} */
+function scrollHalfPageUp(ctx) {
+  scrollByViewportFactor(ctx, -0.5);
 }
 
 const config = {
@@ -102,7 +133,7 @@ module.exports = config;
 
 /** Utilities */
 
-const util = require('node:util');
+const util = require("node:util");
 
 function debug(...args) {
   process.stderr.write(
@@ -113,6 +144,6 @@ function debug(...args) {
         },
         ...args,
       )
-      .replaceAll('\n', '\r\n'),
+      .replaceAll("\n", "\r\n"),
   );
 }

@@ -6,7 +6,11 @@ import {
   screen,
 } from 'electron';
 import path from 'node:path';
-import { registerPaintedContent, registerPaintedContentFallback } from './paint';
+import {
+  registerPaintedContent,
+  registerPaintedContentFallback,
+  registerPaintedContentTmux,
+} from './paint';
 import { sessionPromise } from './session';
 import { extensionsPromise, installedExtensionsPromise } from './extensions';
 import { paintInitialFrame } from './tty/kittyGraphics';
@@ -27,6 +31,7 @@ import { getDisplayScale } from './dpi';
 import { features } from './features';
 import { updateCursor } from './tty/cursor';
 import { debounce } from './debounce';
+import { isTmuxSession } from './tty/tmux';
 
 export type Actions = {
   back: () => void;
@@ -101,6 +106,7 @@ export async function createWindowWithToolbar(
   const contentNode = row({ height: auto(), tag: 'content' });
 
   const hasAnimation = features.current?.loadFrame && features.current.compositeFrame;
+  const useTmuxRenderer = isTmuxSession();
 
   // Calculate layout
   calculateLayout(layoutContainer, [toolbarNode, contentNode]);
@@ -157,7 +163,12 @@ export async function createWindowWithToolbar(
   const destructors: Array<() => void> = [];
 
   function registerPaints(size: Size) {
-    if (hasAnimation) {
+    if (useTmuxRenderer) {
+      destructors.push(
+        registerPaintedContentTmux(toolbar, toolbarNode).destroy,
+        registerPaintedContentTmux(content, contentNode).destroy,
+      );
+    } else if (hasAnimation) {
       const containerBuffer = new ShmGraphicBuffer(size.width * size.height * 4);
       containerBuffer.writeEmpty();
       const containerFrame = paintInitialFrame(containerBuffer, size);

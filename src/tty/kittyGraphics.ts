@@ -3,6 +3,7 @@ import type { Rect, Size } from './graphics';
 import { options } from '../args';
 import type { ShmGraphicBuffer } from 'awrit-native-rs';
 import { placeCursor } from './output';
+import { isTmuxSession, tmuxWrap } from './tmux';
 const { stdout } = process;
 
 let imageId_ = 1;
@@ -95,7 +96,8 @@ function compositeFrame(
 }
 
 export function clearPlacements() {
-  stdout.write(GFX`a=d,d=A`);
+  const command = GFX`a=d,d=A`;
+  stdout.write(isTmuxSession() ? tmuxWrap(command) : command);
 }
 
 function freeImage(id: ImageId) {
