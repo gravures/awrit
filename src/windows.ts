@@ -93,7 +93,6 @@ export async function createWindowWithToolbar(
   size: { width: number; height: number },
   initialUrl = 'https://github.com/chase/awrit',
 ): Promise<WindowView> {
-  console_.error('size', size);
   // Create layout container with device pixel dimensions
   const layoutContainer = layout(
     size.width,
@@ -253,7 +252,6 @@ export async function createWindowWithToolbar(
       destructors.length = 0;
 
       const size = getWindowSize();
-      console_.error('resize', size);
       updateViewSizes(view, size);
       registerPaints(padSize(size));
     }),

@@ -69,19 +69,28 @@ const distVersion = Bun.file(join(root, 'dist/version'));
 if (!(await distVersion.exists()) || (await distVersion.text()) !== version || options.rebuild) {
   console.error('building toolbar');
   let didQueryColors = false;
+  const isTTY = process.stdout.isTTY && process.stdin.isTTY;
+  let warned = false; // only log once, and suppress when not a TTY
   for (let tries = 0; !didQueryColors && tries < 3; tries++) {
     try {
-      process.stdin.setRawMode(true);
+      if (process.stdin.isTTY) process.stdin.setRawMode(true);
       const colors = await queryColors();
-      process.stdin.setRawMode(false);
+      if (process.stdin.isTTY) process.stdin.setRawMode(false);
       if (!colors) {
-        console.error('Failed to query terminal colors');
+        if (isTTY && !warned) {
+          console.error('Failed to query terminal colors');
+          warned = true;
+        }
       } else {
         await Bun.write(join(root, 'dist/kitty.css'), colorsToTailwind(colors));
         didQueryColors = true;
       }
     } catch {
-      console.error('Failed to query terminal colors');
+      if (isTTY && !warned) {
+        console.error('Failed to query terminal colors');
+        warned = true;
+      }
+      if (process.stdin.isTTY) process.stdin.setRawMode(false);
     }
   }
   // TODO: figure out why this isn't reliable for some users
