@@ -48,6 +48,40 @@ function parseKeyBinding(binding: string): string[] {
         // Handle special keys
         const special = current.toLowerCase();
         const mods = special.split('-');
+        let lastPart = mods[mods.length - 1].toLowerCase();
+
+        // Normalize special key names to match awrit-native-rs
+        switch (lastPart) {
+          case 'cr':
+          case 'enter':
+            lastPart = 'return';
+            break;
+          case 'esc':
+            lastPart = 'escape';
+            break;
+          case 'bs':
+            lastPart = 'backspace';
+            break;
+          case 'up':
+          case 'down':
+          case 'left':
+          case 'right':
+          case 'home':
+          case 'end':
+          case 'pageup':
+          case 'pagedown':
+          case 'tab':
+          case 'delete':
+          case 'insert':
+          case 'space':
+          case 'plus':
+            lastPart = '+';
+            break;
+          case 'minus':
+            lastPart = '-';
+            break;
+        }
+
         for (const mod of mods.slice(0, -1)) {
           switch (mod) {
             case 'c':

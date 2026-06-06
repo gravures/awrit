@@ -14,7 +14,21 @@ import {
 import { sessionPromise } from './session';
 import { extensionsPromise, installedExtensionsPromise } from './extensions';
 import { paintInitialFrame } from './tty/kittyGraphics';
-import { getWindowSize, ShmGraphicBuffer } from 'awrit-native-rs';
+import {
+  getWindowSize as rawGetWindowSize,
+  ShmGraphicBuffer,
+  type WindowSize,
+} from 'awrit-native-rs';
+import { loadZoomState, getZoomFactor, setZoomFactor, saveZoomState } from './zoom-state';
+
+export function getWindowSize() {
+  try {
+    return rawGetWindowSize();
+  } catch (e) {
+    console_.error('Failed to get window size:', e);
+    return { width: 0, height: 0, cols: 0, rows: 0 };
+  }
+}
 import { options } from './args';
 import { console_ } from './console';
 import { TOOLBAR_PORT } from './runner/ports';
@@ -161,6 +175,91 @@ export async function createWindowWithToolbar(
 
   const destructors: Array<() => void> = [];
 
+  let suppressionTimeout: NodeJS.Timeout | null = null;
+
+  const startSuppression = () => {
+    // @ts-expect-error
+    content.isSuppressingPaint = true;
+    // We do NOT suppress the toolbar anymore, so the progress bar stays visible
+    // @ts-expect-error
+    content.paintCount = 0;
+
+    if (!options.transparent) {
+      content.setBackgroundColor('#000000');
+    }
+
+    // Safety timeout: never suppress for more than 200ms (fast reveal, dark mode eliminates flash)
+    if (suppressionTimeout) clearTimeout(suppressionTimeout);
+    suppressionTimeout = setTimeout(() => {
+      if (popupActive) return;
+      // @ts-expect-error
+      content.isSuppressingPaint = false;
+      content.webContents.invalidate();
+      suppressionTimeout = null;
+    }, 200);
+  };
+
+  let popupActive = false;
+
+  const stopSuppression = (delay = 300, force = false) => {
+    if (popupActive) return; // Never unsuppress while popup is displayed
+    if (suppressionTimeout) clearTimeout(suppressionTimeout);
+
+    const execute = () => {
+      // @ts-expect-error
+      content.isSuppressingPaint = false;
+      content.webContents.invalidate();
+      suppressionTimeout = null;
+    };
+
+    if (force) {
+      execute();
+      return;
+    }
+
+    suppressionTimeout = setTimeout(() => {
+      if (!content.webContents.isLoading() || delay === 0) {
+        execute();
+      } else {
+        // Still loading, extend suppression
+        stopSuppression(delay);
+      }
+    }, delay);
+  };
+
+  content.on('content-ready' as any, () => {
+    if (popupActive) return;
+    console_.log('[Navigation] Content-ready detected (45 frames), reveal starting...');
+    stopSuppression(0, true);
+  });
+
+  content.webContents.on('did-navigate', () => {
+    if (!options.transparent) {
+      // Inject white background as a user stylesheet.
+      // This ensures sites without explicit backgrounds are legible,
+      // but allows site-defined backgrounds to take precedence.
+      // Because the window background is PERMANENTLY black, there is no flash.
+      content.webContents.insertCSS('html { background-color: #1C1B22; }', { cssOrigin: 'user' });
+    }
+
+    // Load and apply saved zoom for navigated origin
+    try {
+      const url = view.content.webContents.getURL();
+      const origin = new URL(url).origin;
+      const savedZoom = getZoomFactor(origin);
+      if (savedZoom !== 1.0) {
+        view.content.webContents.setZoomFactor(savedZoom);
+      }
+    } catch {}
+  });
+
+  content.webContents.on('dom-ready', () => {
+    // Site has parsed its HTML, likely has content/loader to show.
+    stopSuppression(100);
+  });
+
+  // let lastPaintSize: WindowDimensions = padSize(size);
+
   function registerPaints(size: Size) {
     if (useTmuxRenderer) {
       destructors.push(
@@ -176,6 +275,32 @@ export async function createWindowWithToolbar(
         registerPaintedContent(containerFrame, toolbar, toolbarNode).destroy,
         registerPaintedContent(containerFrame, content, contentNode).destroy,
       );
+
+      // function registerPaints(size: WindowDimensions) {
+      //   lastPaintSize = size;
+      //   destructors.forEach((d) => { d(); });
+      //   destructors.length = 0;
+      //   refreshers.length = 0;
+
+      //   if (hasAnimation) {
+      //     // Content layer (z=0)
+      //     const contentBuffer = new ShmGraphicBuffer(size.width * size.height * 4);
+      //     const opaqueBlack = Buffer.alloc(size.width * size.height * 4).fill(Uint8Array.from([0, 0, 0, 255]));
+      //     contentBuffer.write(opaqueBlack, size.width);
+      //     out.placeCursor({ x: 0, y: 0 });
+      //     const contentFrame = paintInitialFrame(contentBuffer, size, { z: 0 });
+      //     const cRef = registerPaintedContent(contentFrame, content, contentNode);
+
+      //     // Toolbar layer (z=1)
+      //     const toolbarBuffer = new ShmGraphicBuffer(size.width * size.height * 4);
+      //     const transparentBlack = Buffer.alloc(size.width * size.height * 4).fill(Uint8Array.from([0, 0, 0, 0]));
+      //     toolbarBuffer.write(transparentBlack, size.width);
+      //     out.placeCursor({ x: 0, y: 0 });
+      //     const toolbarFrame = paintInitialFrame(toolbarBuffer, size, { z: 1 });
+      //     const tRef = registerPaintedContent(toolbarFrame, toolbar, toolbarNode);
+
+      //     destructors.push(contentFrame.free, toolbarFrame.free, cRef.destroy, tRef.destroy);
+      //     refreshers.push(cRef.refresh, tRef.refresh);
     } else {
       destructors.push(
         registerPaintedContentFallback(toolbar, toolbarNode).destroy,
@@ -214,6 +339,22 @@ export async function createWindowWithToolbar(
   }
   resetForFrameQuirk(content.webContents);
   content.webContents.loadURL(initialUrl);
+
+  // Apply saved zoom for initial URL
+  try {
+    const origin = new URL(initialUrl).origin;
+    const savedZoom = getZoomFactor(origin);
+    if (savedZoom !== 1.0) {
+      content.webContents.setZoomFactor(savedZoom);
+    }
+  } catch {}
+
+  content.webContents.invalidate();
+
+  // Limit offscreen rendering frame rate to reduce CPU usage.
+  // Terminals can't display faster than ~60fps anyway.
+  content.webContents.setFrameRate(60);
+  toolbar.webContents.setFrameRate(30); // Toolbar is mostly static
 
   toolbar.webContents.on('cursor-changed', updateCursor);
   content.webContents.on('cursor-changed', updateCursor);
