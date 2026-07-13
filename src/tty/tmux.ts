@@ -94,9 +94,18 @@ export function getPaneSize(): TmuxPaneSize {
 
 export function getPaneStatus(): TmuxPaneStatus {
   const pane = getPaneId();
-  const status = runTmux(['display-message', '-t', pane, '-p', '#{window_active}#{pane_active}']);
-  if (status === '11') return 'active';
-  if (status === '10') return 'inactive';
+  const status = runTmux([
+    'display-message',
+    '-t',
+    pane,
+    '-p',
+    '#{window_active_clients} #{pane_active}',
+  ]);
+  const [viewersRaw, paneActive] = status.split(/\s+/);
+  const viewers = Number(viewersRaw);
+  if (!Number.isInteger(viewers) || viewers <= 0) return 'invisible';
+  if (paneActive === '1') return 'active';
+  if (paneActive === '0') return 'inactive';
   return 'invisible';
 }
 

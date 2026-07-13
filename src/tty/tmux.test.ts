@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fakeTimers } from '../fake-timers.test';
-import { getAllowPassthrough, getPaneSize } from './tmux';
+import { getAllowPassthrough, getPaneSize, getPaneStatus } from './tmux';
 
 const clock = fakeTimers();
 
@@ -19,6 +19,7 @@ describe('tmux helpers', () => {
   const originalTmux = process.env.TMUX;
   const originalArgsLog = process.env.AWRIT_TMUX_ARGS_LOG;
   const originalSize = process.env.AWRIT_TMUX_SIZE;
+  const originalStatus = process.env.AWRIT_TMUX_STATUS;
 
   let fixtureDir = '';
   let logPath = '';
@@ -45,8 +46,8 @@ if [[ "\${1:-}" == "display-message" && "\${5:-}" == "#{pane_tty}" ]]; then
   echo "/dev/ttys001"
   exit 0
 fi
-if [[ "\${1:-}" == "display-message" && "\${5:-}" == "#{window_active}#{pane_active}" ]]; then
-  echo "11"
+if [[ "\${1:-}" == "display-message" && "\${5:-}" == "#{window_active_clients} #{pane_active}" ]]; then
+  echo "\${AWRIT_TMUX_STATUS:-1 1}"
   exit 0
 fi
 if [[ "\${1:-}" == "show-options" && "\${7:-}" == "allow-passthrough" ]]; then
@@ -62,6 +63,7 @@ echo ""
     process.env.PATH = `${fixtureDir}:${originalPath ?? ''}`;
     process.env.AWRIT_TMUX_ARGS_LOG = logPath;
     process.env.AWRIT_TMUX_SIZE = '120 40';
+    process.env.AWRIT_TMUX_STATUS = '1 1';
     process.env.TMUX = '/tmp/tmux-123/default,123,0';
   });
 
@@ -96,6 +98,12 @@ echo ""
       process.env.AWRIT_TMUX_SIZE = originalSize;
     }
 
+    if (originalStatus == null) {
+      delete process.env.AWRIT_TMUX_STATUS;
+    } else {
+      process.env.AWRIT_TMUX_STATUS = originalStatus;
+    }
+
     rmSync(fixtureDir, { recursive: true, force: true });
   });
 
@@ -111,6 +119,22 @@ echo ""
 
     expect(getAllowPassthrough()).toBe('all');
     expect(readFileSync(logPath, 'utf8')).toContain('show-options -p -A -v -t');
+  });
+
+  test('distinguishes focused and unfocused panes that clients can see', () => {
+    process.env.TMUX_PANE = `%${Date.now()}3`;
+
+    process.env.AWRIT_TMUX_STATUS = '2 1';
+    expect(getPaneStatus()).toBe('active');
+    process.env.AWRIT_TMUX_STATUS = '2 0';
+    expect(getPaneStatus()).toBe('inactive');
+  });
+
+  test('treats an active window with no viewing clients as invisible', () => {
+    process.env.TMUX_PANE = `%${Date.now()}4`;
+    process.env.AWRIT_TMUX_STATUS = '0 1';
+
+    expect(getPaneStatus()).toBe('invisible');
   });
 
   test('caches pane size for the same pane id within TTL', () => {
