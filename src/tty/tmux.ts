@@ -99,11 +99,12 @@ export function getPaneStatus(): TmuxPaneStatus {
     '-t',
     pane,
     '-p',
-    '#{window_active_clients} #{pane_active}',
+    '#{window_active_clients} #{pane_active} #{window_zoomed_flag}',
   ]);
-  const [viewersRaw, paneActive] = status.split(/\s+/);
+  const [viewersRaw, paneActive, windowZoomed] = status.split(/\s+/);
   const viewers = Number(viewersRaw);
   if (!Number.isInteger(viewers) || viewers <= 0) return 'invisible';
+  if (windowZoomed === '1' && paneActive === '0') return 'invisible';
   if (paneActive === '1') return 'active';
   if (paneActive === '0') return 'inactive';
   return 'invisible';
