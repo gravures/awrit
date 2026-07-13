@@ -113,7 +113,7 @@ function setup() {
     try {
       const tmuxVersion = getTmuxVersion();
       if (!allowPassthroughEnabled()) {
-        console_.error('tmux allow-passthrough is disabled. Set `set -gq allow-passthrough all`.');
+        console_.error('tmux allow-passthrough is disabled. Set `set -gq allow-passthrough on`.');
       }
       if (!mouseEnabled()) {
         console_.error('tmux mouse mode is disabled. Set `set -g mouse on` for pointer input.');

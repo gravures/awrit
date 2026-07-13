@@ -40,7 +40,7 @@ terminal window. It requires tmux 3.4 or newer with graphics passthrough and
 mouse input enabled:
 
 ```tmux
-set -gq allow-passthrough all
+set -gq allow-passthrough on
 set -g mouse on
 ```
 

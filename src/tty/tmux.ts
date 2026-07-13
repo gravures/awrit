@@ -62,17 +62,6 @@ export function mouseEnabled() {
   return runTmux(['show', '-gv', 'mouse']) === 'on';
 }
 
-export function allowPassthroughAll() {
-  return getAllowPassthrough() === 'all';
-}
-
-export function requireAllowPassthroughAll() {
-  const value = getAllowPassthrough();
-  if (value !== 'all') {
-    throw new Error(`tmux allow-passthrough must be set to "all" (found "${value}")`);
-  }
-}
-
 export function getPaneTty() {
   const pane = getPaneId();
   return runTmux(['display-message', '-t', pane, '-p', '#{pane_tty}']);
