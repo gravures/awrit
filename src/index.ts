@@ -70,8 +70,8 @@ let quitListening = () => {};
 
 const cleanup = (signum = 1, reason?: string) => {
   quitListening();
-  clearPlacements();
   closeTmuxRenderer();
+  clearPlacements();
   out.cleanup();
   if (features.current) {
     termDisableFeatures(features.current);

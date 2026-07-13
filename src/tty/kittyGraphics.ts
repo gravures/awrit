@@ -3,7 +3,7 @@ import type { Rect, Size } from './graphics';
 import { options } from '../args';
 import type { ShmGraphicBuffer } from 'awrit-native-rs';
 import { placeCursor } from './output';
-import { isTmuxSession, tmuxWrap } from './tmux';
+import { isTmuxSession } from './tmux';
 const { stdout } = process;
 
 let imageId_ = 1;
@@ -96,8 +96,11 @@ function compositeFrame(
 }
 
 export function clearPlacements() {
+  // Tmux renderers delete only the image IDs owned by this process. A global
+  // delete would also erase graphics belonging to other panes and programs.
+  if (isTmuxSession()) return;
   const command = GFX`a=d,d=A`;
-  stdout.write(isTmuxSession() ? tmuxWrap(command) : command);
+  stdout.write(command);
 }
 
 function freeImage(id: ImageId) {

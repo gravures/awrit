@@ -61,15 +61,14 @@ export function buildTmuxPlaceholderLines(
   rows: number,
   pane: PaneBounds,
 ) {
-  if (cols > ROW_COLUMN_DIACRITICS.length || rows > ROW_COLUMN_DIACRITICS.length) {
-    throw new Error(
-      `Image grid ${cols}x${rows} exceeds placeholder encoding limits (${ROW_COLUMN_DIACRITICS.length})`,
-    );
-  }
-
   const visibleCols = Math.max(0, Math.min(cols, pane.cols - startCol));
   const visibleRows = Math.max(0, Math.min(rows, pane.rows - startRow));
   if (visibleCols === 0 || visibleRows === 0) return [];
+  if (visibleCols > ROW_COLUMN_DIACRITICS.length || visibleRows > ROW_COLUMN_DIACRITICS.length) {
+    throw new Error(
+      `Visible image grid ${visibleCols}x${visibleRows} exceeds placeholder encoding limits (${ROW_COLUMN_DIACRITICS.length})`,
+    );
+  }
 
   const lines: string[] = [];
   const { r, g, b } = idToRgb(id);

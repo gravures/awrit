@@ -5,6 +5,7 @@ import { options } from './args';
 import { console_ } from './console';
 import { features } from './features';
 import type { LayoutNode } from './layout';
+import { createImageIdAllocator } from './tty/imageIds';
 import {
   type AnimationFrame,
   type InitialFrame,
@@ -61,17 +62,11 @@ function createTmuxRenderer(): TmuxPaintRenderer | null {
 }
 
 const tmuxRenderer = createTmuxRenderer();
-let nextTmuxImageId = 1;
+const allocateTmuxImageId = createImageIdAllocator();
 const TMUX_RENDER_RETRY_BASE_MS = 250;
 const TMUX_RENDER_RETRY_MAX_MS = 5_000;
 let tmuxRendererFailures = 0;
 let tmuxRendererRetryAfter = 0;
-
-function allocateTmuxImageId() {
-  nextTmuxImageId = (nextTmuxImageId + 1) & 0xffffff;
-  if (nextTmuxImageId === 0) nextTmuxImageId = 1;
-  return nextTmuxImageId;
-}
 
 function canRenderWithTmux(now = Date.now()) {
   return now >= tmuxRendererRetryAfter;

@@ -96,6 +96,25 @@ describe('tmuxProtocol', () => {
     expect(placeholderCount).toBe(6);
   });
 
+  test('checks placeholder limits after clipping to pane bounds', () => {
+    const lines = buildTmuxPlaceholderLines(0x123456, 0, 0, 500, 500, {
+      cols: 5,
+      rows: 3,
+    });
+
+    expect(lines.length).toBe(3);
+    const placeholderCount = [...lines.join('')].filter(
+      (char) => char === TMUX_IMAGE_PLACEHOLDER,
+    ).length;
+    expect(placeholderCount).toBe(15);
+  });
+
+  test('rejects a visible grid that exceeds placeholder encoding limits', () => {
+    expect(() =>
+      buildTmuxPlaceholderLines(0x123456, 0, 0, 500, 500, { cols: 500, rows: 3 }),
+    ).toThrow('Visible image grid');
+  });
+
   test('buildTmuxDeleteImageCommand wraps delete command for tmux', () => {
     const command = buildTmuxDeleteImageCommand(1234);
     expect(command.startsWith('\x1bPtmux;')).toBe(true);

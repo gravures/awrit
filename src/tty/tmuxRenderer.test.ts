@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import type { TmuxPaneStatus } from './tmux';
 import { TmuxRenderer } from './tmuxRenderer';
 
 describe('TmuxRenderer', () => {
@@ -41,5 +42,82 @@ describe('TmuxRenderer', () => {
 
     const output = readFileSync(outputPath, 'utf8');
     expect(output.includes('a=d,d=I,i=99')).toBe(true);
+  });
+
+  test('close deletes each owned image once without using a global delete', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'awrit-tmux-renderer-'));
+    tempDirs.push(dir);
+    const outputPath = join(dir, 'out.txt');
+    const fd = openSync(outputPath, 'w');
+    openedFds.push(fd);
+
+    const renderer = new TmuxRenderer() as any;
+    renderer.outputFd = fd;
+    renderer.pendingBySlot.set(7, { slotId: 7 });
+    renderer.displayedImageBySlot.set(7, 99);
+    renderer.displayedImageBySlot.set(8, 100);
+    renderer.displayedImageBySlot.set(9, 99);
+
+    renderer.close();
+
+    expect(renderer.pendingBySlot.size).toBe(0);
+    expect(renderer.displayedImageBySlot.size).toBe(0);
+
+    closeSync(fd);
+    openedFds.pop();
+
+    const output = readFileSync(outputPath, 'utf8');
+    expect(output.match(/a=d,d=I,i=99/g)?.length).toBe(1);
+    expect(output.match(/a=d,d=I,i=100/g)?.length).toBe(1);
+    expect(output.includes('d=A')).toBe(false);
+  });
+
+  test('retains a hidden repaint and flushes it when the pane becomes visible', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'awrit-tmux-renderer-'));
+    tempDirs.push(dir);
+    const outputPath = join(dir, 'out.txt');
+    const fd = openSync(outputPath, 'w');
+    openedFds.push(fd);
+    let status: TmuxPaneStatus = 'invisible';
+
+    const renderer = new TmuxRenderer(() => status) as any;
+    renderer.outputFd = fd;
+
+    await renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
+
+    expect(readFileSync(outputPath, 'utf8')).toBe('');
+    expect(renderer.pendingBySlot.get(7)?.imageId).toBe(77);
+
+    status = 'active';
+    await renderer.checkVisibilityAndFlush();
+
+    const output = readFileSync(outputPath, 'utf8');
+    expect(output.includes('a=T,i=77')).toBe(true);
+    expect(renderer.pendingBySlot.size).toBe(0);
+
+    renderer.close();
+  });
+
+  test('replays the latest owned image after a visible-to-hidden race', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'awrit-tmux-renderer-'));
+    tempDirs.push(dir);
+    const outputPath = join(dir, 'out.txt');
+    const fd = openSync(outputPath, 'w');
+    openedFds.push(fd);
+    let status: TmuxPaneStatus = 'active';
+
+    const renderer = new TmuxRenderer(() => status) as any;
+    renderer.outputFd = fd;
+    await renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
+
+    status = 'invisible';
+    await renderer.checkVisibilityAndFlush();
+    status = 'active';
+    await renderer.checkVisibilityAndFlush();
+
+    const output = readFileSync(outputPath, 'utf8');
+    expect(output.match(/a=T,i=77/g)?.length).toBe(2);
+
+    renderer.close();
   });
 });

@@ -5,6 +5,7 @@ import {
   buildTmuxPlaceholderLines,
   buildTmuxUploadCommands,
 } from './tmuxProtocol';
+import { getPaneStatus, type TmuxPaneStatus } from './tmux';
 
 type PaneBounds = {
   cols: number;
@@ -37,41 +38,64 @@ export class TmuxRenderer {
   private dumpPlaceholdersPath: string | null;
   private dumpGfxPath: string | null;
   private pendingBySlot: Map<number, RenderRequest>;
+  private latestBySlot: Map<number, RenderRequest>;
   private displayedImageBySlot: Map<number, number>;
   private flushInProgress: boolean;
   private flushPromise: Promise<void>;
+  private paneStatus: () => TmuxPaneStatus;
+  private currentPaneStatus: TmuxPaneStatus | null;
+  private visibilityTimer: ReturnType<typeof setTimeout> | null;
+  private closed: boolean;
 
-  constructor() {
+  constructor(paneStatus: () => TmuxPaneStatus = getPaneStatus) {
     this.outputFd = process.stdout.fd;
     this.dumpPlaceholdersPath = options['tmux-dump']
       ? '/tmp/awrit-tmux-placeholders.log'
       : null;
     this.dumpGfxPath = options['tmux-dump'] ? '/tmp/awrit-tmux-gfx.log' : null;
     this.pendingBySlot = new Map();
+    this.latestBySlot = new Map();
     this.displayedImageBySlot = new Map();
     this.flushInProgress = false;
     this.flushPromise = Promise.resolve();
+    this.paneStatus = paneStatus;
+    this.currentPaneStatus = null;
+    this.visibilityTimer = null;
+    this.closed = false;
   }
 
   close() {
+    this.closed = true;
+    if (this.visibilityTimer) clearTimeout(this.visibilityTimer);
+    this.visibilityTimer = null;
     this.pendingBySlot.clear();
+    this.latestBySlot.clear();
+    const displayedImageIds = new Set(this.displayedImageBySlot.values());
     this.displayedImageBySlot.clear();
+    for (const imageId of displayedImageIds) {
+      this.deleteImage(imageId);
+    }
   }
 
   releaseSlot(slotId: number) {
     this.pendingBySlot.delete(slotId);
+    this.latestBySlot.delete(slotId);
     const displayedImageId = this.displayedImageBySlot.get(slotId);
     if (displayedImageId == null) return;
     this.displayedImageBySlot.delete(slotId);
 
-    const deleteCommand = buildTmuxDeleteImageCommand(displayedImageId);
+    this.deleteImage(displayedImageId);
+  }
+
+  private deleteImage(imageId: number) {
+    const deleteCommand = buildTmuxDeleteImageCommand(imageId);
     writeAll(this.outputFd, deleteCommand);
-    if (this.dumpGfxPath) {
-      fs.appendFileSync(this.dumpGfxPath, `${deleteCommand}\n`);
-    }
+    if (this.dumpGfxPath) fs.appendFileSync(this.dumpGfxPath, `${deleteCommand}\n`);
   }
 
   private scheduleFlush() {
+    if (this.closed || this.pendingBySlot.size === 0) return Promise.resolve();
+    if (this.currentPaneStatus === 'invisible') return Promise.resolve();
     if (this.flushInProgress) return this.flushPromise;
     this.flushInProgress = true;
     this.flushPromise = Promise.resolve()
@@ -80,6 +104,36 @@ export class TmuxRenderer {
         this.flushInProgress = false;
       });
     return this.flushPromise;
+  }
+
+  private scheduleVisibilityCheck() {
+    if (this.closed || this.visibilityTimer) return;
+    this.visibilityTimer = setTimeout(() => this.checkVisibilityAndFlush(), 250);
+    this.visibilityTimer.unref();
+  }
+
+  private async checkVisibilityAndFlush() {
+    if (this.visibilityTimer) clearTimeout(this.visibilityTimer);
+    this.visibilityTimer = null;
+    if (this.closed) return;
+
+    try {
+      const previousStatus = this.currentPaneStatus;
+      this.currentPaneStatus = this.paneStatus();
+      if (previousStatus === 'invisible' && this.currentPaneStatus !== 'invisible') {
+        for (const [slotId, request] of this.latestBySlot) {
+          this.pendingBySlot.set(slotId, request);
+        }
+        await this.scheduleFlush();
+      }
+    } catch {
+      // Force the next successful visible poll to replay the retained images.
+      this.currentPaneStatus = 'invisible';
+    } finally {
+      // Visible panes need only a one-shot check after each repaint. Hidden
+      // panes keep polling so their retained frame is replayed on return.
+      if (this.currentPaneStatus === 'invisible') this.scheduleVisibilityCheck();
+    }
   }
 
   private flushPending() {
@@ -146,7 +200,8 @@ export class TmuxRenderer {
     pane: PaneBounds,
     slotId: number,
   ) {
-    this.pendingBySlot.set(slotId, {
+    if (this.closed) return Promise.resolve();
+    const request = {
       slotId,
       pngBuffer,
       imageId,
@@ -155,7 +210,11 @@ export class TmuxRenderer {
       startCol,
       startRow,
       pane,
-    });
+    };
+    this.latestBySlot.set(slotId, request);
+    this.pendingBySlot.set(slotId, request);
+    if (this.currentPaneStatus == null) this.currentPaneStatus = this.paneStatus();
+    this.scheduleVisibilityCheck();
     return this.scheduleFlush();
   }
 }
