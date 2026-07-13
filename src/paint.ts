@@ -14,7 +14,6 @@ import {
 } from './tty/kittyGraphics';
 import { getPaneSize, isTmuxSession } from './tty/tmux';
 import { TmuxRenderer } from './tty/tmuxRenderer';
-import { TimgRenderer } from './tty/timgRenderer';
 
 type PaintedContent = {
   frame?: AnimationFrame;
@@ -45,19 +44,6 @@ type TmuxPaintRenderer = {
 
 function createTmuxRenderer(): TmuxPaintRenderer | null {
   if (!isTmuxSession()) return null;
-
-  const requestedRenderer = options['tmux-renderer'];
-  if (requestedRenderer && requestedRenderer !== 'native' && requestedRenderer !== 'timg') {
-    console_.error(
-      `Unknown tmux renderer "${requestedRenderer}". Falling back to "native". Valid values: native|timg`,
-    );
-  }
-
-  const renderer = requestedRenderer === 'timg' ? 'timg' : 'native';
-  if (renderer === 'timg') {
-    console_.error('Using tmux renderer backend: timg');
-    return new TimgRenderer();
-  }
   return new TmuxRenderer();
 }
 

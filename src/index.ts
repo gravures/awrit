@@ -18,7 +18,7 @@ import { getForcedTmuxMouseCoordinateMode } from './tty/mouseCoordinates';
 import fs from 'node:fs';
 import path from 'node:path';
 import { closeTmuxRenderer } from './paint';
-import { allowPassthroughEnabled, getTmuxVersion, isTmuxSession, mouseEnabled } from './tty/tmux';
+import { getAllowPassthrough, getTmuxVersion, isTmuxSession, mouseEnabled } from './tty/tmux';
 
 let homepage = 'https://github.com/chase/awrit';
 
@@ -112,8 +112,10 @@ function setup() {
   if (tmux) {
     try {
       const tmuxVersion = getTmuxVersion();
-      if (!allowPassthroughEnabled()) {
-        console_.error('tmux allow-passthrough is disabled. Set `set -gq allow-passthrough on`.');
+      if (getAllowPassthrough() !== 'all') {
+        console_.error(
+          'This pane does not allow hidden passthrough cleanup. Launch Awrit through its `awrit` wrapper.',
+        );
       }
       if (!mouseEnabled()) {
         console_.error('tmux mouse mode is disabled. Set `set -g mouse on` for pointer input.');

@@ -1,8 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
 import {
   buildTmuxDeleteImageCommand,
   TMUX_IMAGE_PLACEHOLDER,
@@ -127,48 +123,4 @@ describe('tmuxProtocol', () => {
     expect(control.get('i')).toBe('1234');
     expect(gfx.payload).toBe('');
   });
-});
-
-const hasTimg = spawnSync('timg', ['--version'], { stdio: 'ignore' }).status === 0;
-const maybeTimgTest = hasTimg ? test : test.skip;
-
-maybeTimgTest('tmux upload stream stays compatible with timg control fields', () => {
-  const fixtureDir = mkdtempSync(join(tmpdir(), 'awrit-timg-contract-'));
-  const fixturePath = join(fixtureDir, 'pixel.png');
-
-  // 1x1 transparent PNG fixture
-  const fixture = Buffer.from(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2Wl7sAAAAASUVORK5CYII=',
-    'base64',
-  );
-  writeFileSync(fixturePath, fixture);
-
-  try {
-    const timg = spawnSync('timg', ['-pk', '--frames=1', '--loops=1', '-g', '4x3', fixturePath], {
-      encoding: 'utf8',
-    });
-    expect(timg.status).toBe(0);
-    const raw = timg.stdout;
-    const timgGraphics = parseFirstGraphicsCommand(raw);
-    const timgControl = controlMap(timgGraphics.control);
-
-    // Build our tmux stream using timg's own encoded payload as input bytes.
-    const payloadBytes = Buffer.from(timgGraphics.payload, 'base64');
-    const oursWrapped = buildTmuxUploadCommands(payloadBytes, 42, 4, 3);
-    const ours = parseFirstGraphicsCommand(unwrapTmux(oursWrapped[0]));
-    const oursControl = controlMap(ours.control);
-
-    expect(oursControl.get('a')).toBe(timgControl.get('a'));
-    expect(oursControl.get('q')).toBe(timgControl.get('q'));
-    expect(oursControl.get('f')).toBe(timgControl.get('f'));
-    expect(oursControl.get('m')).toBe(timgControl.get('m'));
-    expect(ours.payload).toBe(timgGraphics.payload);
-
-    // tmux-specific placeholder mode fields we expect in our native stream.
-    expect(oursControl.get('U')).toBe('1');
-    expect(oursControl.get('c')).toBe('4');
-    expect(oursControl.get('r')).toBe('3');
-  } finally {
-    rmSync(fixtureDir, { recursive: true, force: true });
-  }
 });

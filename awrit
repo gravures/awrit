@@ -21,4 +21,41 @@ fi
 
 BUN="$BASE_DIR/.bun/bin/bun"
 echo "shim" "$@" > "$BASE_DIR/awrit_error.txt"
+
+restore_tmux_passthrough() {
+  local status=$?
+  trap - EXIT
+  sleep 0.05
+  if [[ "$AWRIT_TMUX_PASSTHROUGH_RESTORE_MODE" == "inherit" ]]; then
+    tmux set-option -p -u -t "$TMUX_PANE" allow-passthrough >/dev/null 2>&1 || true
+  else
+    tmux set-option -p -t "$TMUX_PANE" allow-passthrough \
+      "$AWRIT_TMUX_PREVIOUS_PASSTHROUGH" >/dev/null 2>&1 || true
+  fi
+  exit "$status"
+}
+
+if [[ -n "${TMUX:-}" && "${TMUX_PANE:-}" =~ ^%[0-9]+$ ]]; then
+  AWRIT_TMUX_LOCAL_PASSTHROUGH="$(
+    tmux show-options -p -v -t "$TMUX_PANE" allow-passthrough 2>/dev/null || true
+  )"
+  AWRIT_TMUX_EFFECTIVE_PASSTHROUGH="$(
+    tmux show-options -p -A -v -t "$TMUX_PANE" allow-passthrough 2>/dev/null || true
+  )"
+  if [[ "$AWRIT_TMUX_EFFECTIVE_PASSTHROUGH" =~ ^(on|off|all)$ ]]; then
+    if [[ "$AWRIT_TMUX_LOCAL_PASSTHROUGH" =~ ^(on|off|all)$ ]]; then
+      AWRIT_TMUX_PASSTHROUGH_RESTORE_MODE=local
+      AWRIT_TMUX_PREVIOUS_PASSTHROUGH="$AWRIT_TMUX_LOCAL_PASSTHROUGH"
+    else
+      AWRIT_TMUX_PASSTHROUGH_RESTORE_MODE=inherit
+      AWRIT_TMUX_PREVIOUS_PASSTHROUGH=""
+    fi
+    if tmux set-option -p -t "$TMUX_PANE" allow-passthrough all; then
+      trap restore_tmux_passthrough EXIT
+      "$BUN" run "$BASE_DIR/src/runner" "$@" 2>"$BASE_DIR/awrit_error.txt"
+      exit $?
+    fi
+  fi
+fi
+
 exec -a awrit "$BUN" run "$BASE_DIR/src/runner" "$@" 2>"$BASE_DIR/awrit_error.txt"

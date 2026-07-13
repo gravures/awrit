@@ -120,4 +120,98 @@ describe('TmuxRenderer', () => {
 
     renderer.close();
   });
+
+  test('confirms a retained repaint even when visibility changes between polls', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'awrit-tmux-renderer-'));
+    tempDirs.push(dir);
+    const outputPath = join(dir, 'out.txt');
+    const fd = openSync(outputPath, 'w');
+    openedFds.push(fd);
+
+    const renderer = new TmuxRenderer(() => 'active') as any;
+    renderer.outputFd = fd;
+    await renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
+
+    // The pane may have become hidden and visible again before this poll. A
+    // retained replay makes that active -> active race lossless.
+    await renderer.checkVisibilityAndFlush();
+
+    const output = readFileSync(outputPath, 'utf8');
+    expect(output.match(/a=T,i=77/g)?.length).toBe(2);
+    renderer.close();
+  });
+
+  test('does not strand a repaint when the initial pane status query fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'awrit-tmux-renderer-'));
+    tempDirs.push(dir);
+    const outputPath = join(dir, 'out.txt');
+    const fd = openSync(outputPath, 'w');
+    openedFds.push(fd);
+    let calls = 0;
+
+    const renderer = new TmuxRenderer(() => {
+      calls += 1;
+      if (calls === 1) throw new Error('temporary tmux failure');
+      return 'active';
+    }) as any;
+    renderer.outputFd = fd;
+
+    await renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
+    await renderer.checkVisibilityAndFlush();
+
+    const output = readFileSync(outputPath, 'utf8');
+    expect(output.match(/a=T,i=77/g)?.length).toBe(2);
+    renderer.close();
+  });
+
+  test('retains and retries a repaint after an output failure', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'awrit-tmux-renderer-'));
+    tempDirs.push(dir);
+    const outputPath = join(dir, 'out.txt');
+    const fd = openSync(outputPath, 'w');
+    openedFds.push(fd);
+
+    const renderer = new TmuxRenderer(() => 'active') as any;
+    renderer.outputFd = -1;
+
+    await expect(
+      renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7),
+    ).rejects.toThrow();
+    expect(renderer.pendingBySlot.get(7)?.imageId).toBe(77);
+    expect(renderer.displayedImageBySlot.has(7)).toBe(false);
+
+    renderer.outputFd = fd;
+    await renderer.checkVisibilityAndFlush();
+
+    expect(readFileSync(outputPath, 'utf8').includes('a=T,i=77')).toBe(true);
+    expect(renderer.displayedImageBySlot.get(7)).toBe(77);
+    renderer.close();
+  });
+
+  test('preserves and deletes the previous image after a replacement write failure', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'awrit-tmux-renderer-'));
+    tempDirs.push(dir);
+    const outputPath = join(dir, 'out.txt');
+    const fd = openSync(outputPath, 'w');
+    openedFds.push(fd);
+
+    const renderer = new TmuxRenderer(() => 'active') as any;
+    renderer.outputFd = fd;
+    await renderer.renderPng(Buffer.from([1]), 50, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
+
+    renderer.outputFd = -1;
+    await expect(
+      renderer.renderPng(Buffer.from([2]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7),
+    ).rejects.toThrow();
+    expect(renderer.displayedImageBySlot.get(7)).toBe(50);
+    expect(renderer.pendingBySlot.get(7)?.imageId).toBe(77);
+
+    renderer.outputFd = fd;
+    await renderer.checkVisibilityAndFlush();
+
+    const output = readFileSync(outputPath, 'utf8');
+    expect(output.includes('a=d,d=I,i=50')).toBe(true);
+    expect(renderer.displayedImageBySlot.get(7)).toBe(77);
+    renderer.close();
+  });
 });

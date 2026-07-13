@@ -9,6 +9,7 @@ FAKE_BIN="$TEMP_DIR/bin"
 OPEN_LOG="$TEMP_DIR/open.log"
 BUN_LOG="$TEMP_DIR/bun.log"
 BUN_DIRECT_LOG="$TEMP_DIR/bun-direct.log"
+TMUX_LOG="$TEMP_DIR/tmux.log"
 PASSED=0
 FAILED=0
 
@@ -26,14 +27,32 @@ cat >"$FAKE_BIN/open" <<'EOF'
 printf '<%s>\n' "$@" >"$AWRIT_TEST_OPEN_LOG"
 exit 99
 EOF
+cat >"$FAKE_BIN/tmux" <<'EOF'
+#!/usr/bin/env bash
+command="${1:-}"
+{
+  printf '%s' "$command"
+  shift || true
+  printf ' <%s>' "$@"
+  printf '\n'
+} >>"$AWRIT_TEST_TMUX_LOG"
+if [[ "$command" == "show-options" ]]; then
+  if [[ " $* " == *" -A "* ]]; then
+    printf '%s\n' "${AWRIT_TEST_TMUX_EFFECTIVE_PASSTHROUGH:-on}"
+  elif [[ -n "${AWRIT_TEST_TMUX_LOCAL_PASSTHROUGH:-}" ]]; then
+    printf '%s\n' "$AWRIT_TEST_TMUX_LOCAL_PASSTHROUGH"
+  fi
+fi
+EOF
 cat >"$COPY/.bun/bin/bun" <<'EOF'
 #!/usr/bin/env bash
 {
   printf 'TMUX=%s\nTMUX_PANE=%s\nPWD=%s\n' "${TMUX-unset}" "${TMUX_PANE-unset}" "$PWD"
   printf '<%s>\n' "$@"
 } >"$AWRIT_TEST_BUN_LOG"
+exit "${AWRIT_TEST_BUN_EXIT:-0}"
 EOF
-chmod +x "$FAKE_BIN/open" "$COPY/.bun/bin/bun"
+chmod +x "$FAKE_BIN/open" "$FAKE_BIN/tmux" "$COPY/.bun/bin/bun"
 
 workdir="$TEMP_DIR/project with spaces"
 mkdir -p "$workdir"
@@ -42,7 +61,7 @@ if (
   cd "$workdir"
   PATH="$FAKE_BIN:/usr/bin:/bin" TMUX=/tmp/tmux TMUX_PANE=%42 \
     AWRIT_OPEN_BIN="$FAKE_BIN/open" AWRIT_TEST_OPEN_LOG="$OPEN_LOG" \
-    AWRIT_TEST_BUN_LOG="$BUN_LOG" \
+    AWRIT_TEST_BUN_LOG="$BUN_LOG" AWRIT_TEST_TMUX_LOG="$TMUX_LOG" \
     "$COPY/awrit" 'https://example.com/a?b=c' >/dev/null
 ) \
   && grep -Fxq 'TMUX=/tmp/tmux' "$BUN_LOG" \
@@ -51,10 +70,43 @@ if (
   && grep -Fxq '<run>' "$BUN_LOG" \
   && grep -Fxq "<$COPY/src/runner>" "$BUN_LOG" \
   && grep -Fxq '<https://example.com/a?b=c>' "$BUN_LOG" \
+  && grep -Fxq 'set-option <-p> <-t> <%42> <allow-passthrough> <all>' "$TMUX_LOG" \
+  && grep -Fxq 'set-option <-p> <-u> <-t> <%42> <allow-passthrough>' "$TMUX_LOG" \
   && [[ ! -e "$OPEN_LOG" ]]; then
-  pass "tmux launch stays in the current pane and preserves exact argv"
+  pass "tmux launch stays in-pane and scopes passthrough for its lifetime"
 else
   fail "tmux launch stays in the current pane and preserves exact argv"
+fi
+
+: >"$TMUX_LOG"
+(
+  cd "$workdir"
+  PATH="$FAKE_BIN:/usr/bin:/bin" TMUX=/tmp/tmux TMUX_PANE=%42 \
+    AWRIT_TEST_BUN_EXIT=7 AWRIT_TEST_BUN_LOG="$BUN_LOG" AWRIT_TEST_TMUX_LOG="$TMUX_LOG" \
+    "$COPY/awrit" --help >/dev/null
+)
+failure_status=$?
+if [[ "$failure_status" -eq 7 ]] \
+  && grep -Fxq 'set-option <-p> <-t> <%42> <allow-passthrough> <all>' "$TMUX_LOG" \
+  && grep -Fxq 'set-option <-p> <-u> <-t> <%42> <allow-passthrough>' "$TMUX_LOG"; then
+  pass "tmux passthrough is restored after runner failure"
+else
+  fail "tmux passthrough is restored after runner failure"
+fi
+
+: >"$TMUX_LOG"
+if (
+  cd "$workdir"
+  PATH="$FAKE_BIN:/usr/bin:/bin" TMUX=/tmp/tmux TMUX_PANE=%42 \
+    AWRIT_TEST_TMUX_LOCAL_PASSTHROUGH=off AWRIT_TEST_TMUX_EFFECTIVE_PASSTHROUGH=off \
+    AWRIT_TEST_BUN_LOG="$BUN_LOG" AWRIT_TEST_TMUX_LOG="$TMUX_LOG" \
+    "$COPY/awrit" --help >/dev/null
+) \
+  && grep -Fxq 'set-option <-p> <-t> <%42> <allow-passthrough> <all>' "$TMUX_LOG" \
+  && grep -Fxq 'set-option <-p> <-t> <%42> <allow-passthrough> <off>' "$TMUX_LOG"; then
+  pass "tmux passthrough restores an existing pane-local override"
+else
+  fail "tmux passthrough restores an existing pane-local override"
 fi
 
 if PATH="$FAKE_BIN:/usr/bin:/bin" AWRIT_TEST_BUN_LOG="$BUN_DIRECT_LOG" \

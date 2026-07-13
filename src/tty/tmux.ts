@@ -50,12 +50,8 @@ export function requireTmuxVersion(minMajor: number, minMinor: number) {
 }
 
 export function getAllowPassthrough() {
-  return runTmux(['show', '-gv', 'allow-passthrough']);
-}
-
-export function allowPassthroughEnabled() {
-  const value = getAllowPassthrough();
-  return value === 'on' || value === 'all';
+  const pane = getPaneId();
+  return runTmux(['show-options', '-p', '-A', '-v', '-t', pane, 'allow-passthrough']);
 }
 
 export function mouseEnabled() {

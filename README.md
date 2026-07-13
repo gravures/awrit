@@ -44,8 +44,11 @@ set -gq allow-passthrough on
 set -g mouse on
 ```
 
-The native renderer is the default. `--tmux-renderer=timg` selects the optional
-`timg` backend. If pointer coordinates are detected incorrectly, set
+The launcher temporarily promotes only its own pane to `allow-passthrough all`
+while Awrit is running, which lets the native renderer clean up its exact image
+IDs even if the pane is hidden. It restores the pane's previous value on exit;
+other panes remain on the safer global `on` setting. If pointer coordinates are
+detected incorrectly, set
 `AWRIT_TMUX_MOUSE_COORDS=cell` or `AWRIT_TMUX_MOUSE_COORDS=pixel` explicitly.
 
 The launcher regression test stays headless and verifies that tmux launches

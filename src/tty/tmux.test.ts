@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fakeTimers } from '../fake-timers.test';
-import { getPaneSize } from './tmux';
+import { getAllowPassthrough, getPaneSize } from './tmux';
 
 const clock = fakeTimers();
 
@@ -49,7 +49,7 @@ if [[ "\${1:-}" == "display-message" && "\${5:-}" == "#{window_active}#{pane_act
   echo "11"
   exit 0
 fi
-if [[ "\${1:-}" == "show" && "\${4:-}" == "allow-passthrough" ]]; then
+if [[ "\${1:-}" == "show-options" && "\${7:-}" == "allow-passthrough" ]]; then
   echo "all"
   exit 0
 fi
@@ -104,6 +104,13 @@ echo ""
 
     expect(() => getPaneSize()).toThrow('Invalid TMUX_PANE value');
     expect(readFileSync(logPath, 'utf8')).toBe('');
+  });
+
+  test('reads the effective pane-scoped passthrough value', () => {
+    process.env.TMUX_PANE = `%${Date.now()}0`;
+
+    expect(getAllowPassthrough()).toBe('all');
+    expect(readFileSync(logPath, 'utf8')).toContain('show-options -p -A -v -t');
   });
 
   test('caches pane size for the same pane id within TTL', () => {

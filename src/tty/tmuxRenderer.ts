@@ -45,6 +45,8 @@ export class TmuxRenderer {
   private paneStatus: () => TmuxPaneStatus;
   private currentPaneStatus: TmuxPaneStatus | null;
   private visibilityTimer: ReturnType<typeof setTimeout> | null;
+  private needsVisibilityConfirmation: boolean;
+  private retryRequired: boolean;
   private closed: boolean;
 
   constructor(paneStatus: () => TmuxPaneStatus = getPaneStatus) {
@@ -61,6 +63,8 @@ export class TmuxRenderer {
     this.paneStatus = paneStatus;
     this.currentPaneStatus = null;
     this.visibilityTimer = null;
+    this.needsVisibilityConfirmation = false;
+    this.retryRequired = false;
     this.closed = false;
   }
 
@@ -68,6 +72,8 @@ export class TmuxRenderer {
     this.closed = true;
     if (this.visibilityTimer) clearTimeout(this.visibilityTimer);
     this.visibilityTimer = null;
+    this.needsVisibilityConfirmation = false;
+    this.retryRequired = false;
     this.pendingBySlot.clear();
     this.latestBySlot.clear();
     const displayedImageIds = new Set(this.displayedImageBySlot.values());
@@ -117,22 +123,37 @@ export class TmuxRenderer {
     this.visibilityTimer = null;
     if (this.closed) return;
 
+    const previousStatus = this.currentPaneStatus;
     try {
-      const previousStatus = this.currentPaneStatus;
       this.currentPaneStatus = this.paneStatus();
-      if (previousStatus === 'invisible' && this.currentPaneStatus !== 'invisible') {
+    } catch {
+      this.currentPaneStatus = 'invisible';
+    }
+
+    if (
+      this.currentPaneStatus !== 'invisible' &&
+      (previousStatus === 'invisible' ||
+        this.needsVisibilityConfirmation ||
+        this.retryRequired)
+    ) {
+      this.needsVisibilityConfirmation = false;
+      this.retryRequired = false;
+      try {
         for (const [slotId, request] of this.latestBySlot) {
           this.pendingBySlot.set(slotId, request);
         }
         await this.scheduleFlush();
+      } catch {
+        // writeAll marks transient output failures for another visible retry.
+        // Deterministic protocol errors remain with the caller's paint retry.
+        if (this.retryRequired) this.currentPaneStatus = 'invisible';
       }
-    } catch {
-      // Force the next successful visible poll to replay the retained images.
-      this.currentPaneStatus = 'invisible';
-    } finally {
-      // Visible panes need only a one-shot check after each repaint. Hidden
-      // panes keep polling so their retained frame is replayed on return.
-      if (this.currentPaneStatus === 'invisible') this.scheduleVisibilityCheck();
+    }
+
+    // Visible panes need only one confirmation after each repaint. Hidden
+    // panes and transient output failures keep polling until replay succeeds.
+    if (this.currentPaneStatus === 'invisible' || this.retryRequired) {
+      this.scheduleVisibilityCheck();
     }
   }
 
@@ -183,10 +204,22 @@ export class TmuxRenderer {
             fs.appendFileSync(this.dumpGfxPath, `${deleteCommand}\n`);
           }
         }
-        this.displayedImageBySlot.set(request.slotId, request.imageId);
       }
       output += SYNC_END;
-      writeAll(this.outputFd, output);
+      try {
+        writeAll(this.outputFd, output);
+        for (const request of batch) {
+          this.displayedImageBySlot.set(request.slotId, request.imageId);
+        }
+      } catch (error) {
+        for (const request of batch) {
+          const latest = this.latestBySlot.get(request.slotId);
+          if (latest) this.pendingBySlot.set(request.slotId, latest);
+        }
+        this.retryRequired = true;
+        this.scheduleVisibilityCheck();
+        throw error;
+      }
     }
   }
 
@@ -213,8 +246,22 @@ export class TmuxRenderer {
     };
     this.latestBySlot.set(slotId, request);
     this.pendingBySlot.set(slotId, request);
-    if (this.currentPaneStatus == null) this.currentPaneStatus = this.paneStatus();
-    this.scheduleVisibilityCheck();
-    return this.scheduleFlush();
+    if (this.currentPaneStatus == null) {
+      try {
+        this.currentPaneStatus = this.paneStatus();
+      } catch {
+        // Pane-scoped passthrough is `all`; rendering is safer than stranding
+        // the retained frame when a status query fails transiently.
+        this.currentPaneStatus = 'active';
+      }
+    }
+    if (this.currentPaneStatus === 'invisible') {
+      this.scheduleVisibilityCheck();
+      return Promise.resolve();
+    }
+    return this.scheduleFlush().then(() => {
+      this.needsVisibilityConfirmation = true;
+      this.scheduleVisibilityCheck();
+    });
   }
 }
