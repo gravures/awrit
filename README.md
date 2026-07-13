@@ -31,6 +31,20 @@ awrit [url]
 # if the URL protocol is not included, https: is used by default
 ```
 
+### Ghostty and tmux on macOS
+
+Awrit needs direct Kitty graphics and progressive keyboard protocol access.
+When its launcher is invoked from tmux on macOS, it opens one direct Ghostty
+surface for that explicit invocation and removes `TMUX` from the child
+environment to avoid recursion. Invocations outside tmux keep running in the
+current terminal normally.
+
+The launcher regression test does not open Ghostty or start the browser:
+
+```bash
+bash tests/test-launcher.sh
+```
+
 For more options look at the help:
 
 ```bash

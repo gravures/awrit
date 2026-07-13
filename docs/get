@@ -120,10 +120,14 @@ if [ "$(uname -s)" = "Darwin" ]; then
   sed -i '' 's/<\/dict>/    <key>LSUIElement<\/key>\n    <true\/>\n<\/dict>/' "$DOWNLOAD_TO/node_modules/electron/dist/Electron.app/Contents/Info.plist" || true
 fi
 
-# Install link to $INSTALL_TO/bin/awrit
+# Install/update link to $INSTALL_TO/bin/awrit. A previous checkout may have
+# moved, leaving a dangling symlink for which `-e` is false; replace symlinks
+# atomically while preserving unrelated regular files.
 exe="$bin_dir/awrit"
-if [[ ! -e $exe ]]; then
-  (cd "$bin_dir" && ln -s "$DOWNLOAD_TO/awrit")
+if [[ -L $exe ]]; then
+  ln -sfn "$DOWNLOAD_TO/awrit" "$exe"
+elif [[ ! -e $exe ]]; then
+  ln -s "$DOWNLOAD_TO/awrit" "$exe"
 else
   info_bold "$(tildify $exe) already exists, skipping link install"
   echo

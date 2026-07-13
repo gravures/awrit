@@ -17,6 +17,7 @@
   },
   "workspaces": ["src/runner"],
   "scripts": {
+    "test": "bun test && bash tests/test-launcher.sh",
     "format": "biome format --write .",
     "lint": "biome lint ./src",
     "lint-fix": "biome lint --write ./src",
