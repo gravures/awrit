@@ -31,15 +31,25 @@ awrit [url]
 # if the URL protocol is not included, https: is used by default
 ```
 
-### Ghostty and tmux on macOS
+### Ghostty and tmux
 
-Awrit needs direct Kitty graphics and progressive keyboard protocol access.
-When its launcher is invoked from tmux on macOS, it opens one direct Ghostty
-surface for that explicit invocation and removes `TMUX` from the child
-environment to avoid recursion. Invocations outside tmux keep running in the
-current terminal normally.
+This fork includes the native tmux renderer adapted from
+[`marromlam/awrit:add-tmux-support`](https://github.com/marromlam/awrit/tree/add-tmux-support).
+Awrit now remains inside the pane that launched it instead of opening another
+terminal window. It requires tmux 3.4 or newer with graphics passthrough and
+mouse input enabled:
 
-The launcher regression test does not open Ghostty or start the browser:
+```tmux
+set -gq allow-passthrough all
+set -g mouse on
+```
+
+The native renderer is the default. `--tmux-renderer=timg` selects the optional
+`timg` backend. If pointer coordinates are detected incorrectly, set
+`AWRIT_TMUX_MOUSE_COORDS=cell` or `AWRIT_TMUX_MOUSE_COORDS=pixel` explicitly.
+
+The launcher regression test stays headless and verifies that tmux launches
+remain in the current pane:
 
 ```bash
 bash tests/test-launcher.sh

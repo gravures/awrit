@@ -15,21 +15,6 @@ resolve_link() {
 }
 
 BASE_DIR=$(cd -- "$(dirname -- "$(resolve_link "${BASH_SOURCE:-$0}")")" &>/dev/null && pwd)
-
-# Kitty graphics and progressive keyboard sequences are terminal protocols;
-# tmux does not transparently forward the traffic Awrit emits. On macOS,
-# preserve the tmux launch as a lazy typed-window action but run the browser in
-# a direct Ghostty surface. Removing TMUX/TMUX_PANE prevents the child launcher
-# from handing off recursively.
-if [[ -n "${TMUX:-}" && "$(uname -s)" == "Darwin" ]]; then
-  open_bin="${AWRIT_OPEN_BIN:-/usr/bin/open}"
-  env -u TMUX -u TMUX_PANE "$open_bin" -na Ghostty.app --args \
-    "--working-directory=$PWD" \
-    "--title=awrit" \
-    -e "$BASE_DIR/awrit" "$@"
-  exit 0
-fi
-
 if [ ! -d "$BASE_DIR/node_modules" ]; then
     "$BASE_DIR/setup.sh"
 fi
