@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fakeTimers } from '../fake-timers.test';
-import { getAllowPassthrough, getPaneSize, getPaneStatus } from './tmux';
+import { getAllowPassthrough, getPaneSize, getPaneState, getPaneStatus } from './tmux';
 
 const clock = fakeTimers();
 
@@ -46,8 +46,8 @@ if [[ "\${1:-}" == "display-message" && "\${5:-}" == "#{pane_tty}" ]]; then
   echo "/dev/ttys001"
   exit 0
 fi
-if [[ "\${1:-}" == "display-message" && "\${5:-}" == "#{window_active_clients} #{pane_active} #{window_zoomed_flag}" ]]; then
-  echo "\${AWRIT_TMUX_STATUS:-1 1 0}"
+if [[ "\${1:-}" == "display-message" && "\${5:-}" == "#{window_active_clients}|#{window_active_clients_list}|#{pane_active}|#{window_zoomed_flag}" ]]; then
+  echo "\${AWRIT_TMUX_STATUS:-1|/dev/ttys001|1|0}"
   exit 0
 fi
 if [[ "\${1:-}" == "show-options" && "\${7:-}" == "allow-passthrough" ]]; then
@@ -63,7 +63,7 @@ echo ""
     process.env.PATH = `${fixtureDir}:${originalPath ?? ''}`;
     process.env.AWRIT_TMUX_ARGS_LOG = logPath;
     process.env.AWRIT_TMUX_SIZE = '120 40';
-    process.env.AWRIT_TMUX_STATUS = '1 1 0';
+    process.env.AWRIT_TMUX_STATUS = '1|/dev/ttys001|1|0';
     process.env.TMUX = '/tmp/tmux-123/default,123,0';
   });
 
@@ -124,24 +124,34 @@ echo ""
   test('distinguishes focused and unfocused panes that clients can see', () => {
     process.env.TMUX_PANE = `%${Date.now()}3`;
 
-    process.env.AWRIT_TMUX_STATUS = '2 1 0';
+    process.env.AWRIT_TMUX_STATUS = '2|/dev/ttys001,/dev/ttys002|1|0';
     expect(getPaneStatus()).toBe('active');
-    process.env.AWRIT_TMUX_STATUS = '2 1 1';
+    process.env.AWRIT_TMUX_STATUS = '2|/dev/ttys001,/dev/ttys002|1|1';
     expect(getPaneStatus()).toBe('active');
-    process.env.AWRIT_TMUX_STATUS = '2 0 0';
+    process.env.AWRIT_TMUX_STATUS = '2|/dev/ttys001,/dev/ttys002|0|0';
     expect(getPaneStatus()).toBe('inactive');
+  });
+
+  test('returns a stable viewer identity independent of tmux list order', () => {
+    process.env.TMUX_PANE = `%${Date.now()}6`;
+    process.env.AWRIT_TMUX_STATUS = '2|/dev/ttys002,/dev/ttys001|1|0';
+
+    expect(getPaneState()).toEqual({
+      status: 'active',
+      viewers: '/dev/ttys001,/dev/ttys002',
+    });
   });
 
   test('treats an active window with no viewing clients as invisible', () => {
     process.env.TMUX_PANE = `%${Date.now()}4`;
-    process.env.AWRIT_TMUX_STATUS = '0 1 0';
+    process.env.AWRIT_TMUX_STATUS = '0||1|0';
 
     expect(getPaneStatus()).toBe('invisible');
   });
 
   test('treats a non-active sibling of a zoomed pane as invisible', () => {
     process.env.TMUX_PANE = `%${Date.now()}5`;
-    process.env.AWRIT_TMUX_STATUS = '1 0 1';
+    process.env.AWRIT_TMUX_STATUS = '1|/dev/ttys001|0|1';
 
     expect(getPaneStatus()).toBe('invisible');
   });

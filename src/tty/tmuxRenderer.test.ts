@@ -5,6 +5,10 @@ import { tmpdir } from 'node:os';
 import type { TmuxPaneStatus } from './tmux';
 import { TmuxRenderer } from './tmuxRenderer';
 
+function paneState(status: TmuxPaneStatus, viewers = 'client-a') {
+  return { status, viewers: status === 'invisible' ? '' : viewers };
+}
+
 describe('TmuxRenderer', () => {
   const openedFds: number[] = [];
   const tempDirs: string[] = [];
@@ -80,7 +84,7 @@ describe('TmuxRenderer', () => {
     openedFds.push(fd);
     let status: TmuxPaneStatus = 'invisible';
 
-    const renderer = new TmuxRenderer(() => status) as any;
+    const renderer = new TmuxRenderer(() => paneState(status)) as any;
     renderer.outputFd = fd;
 
     await renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
@@ -106,7 +110,7 @@ describe('TmuxRenderer', () => {
     openedFds.push(fd);
     let status: TmuxPaneStatus = 'active';
 
-    const renderer = new TmuxRenderer(() => status) as any;
+    const renderer = new TmuxRenderer(() => paneState(status)) as any;
     renderer.outputFd = fd;
     await renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
 
@@ -128,7 +132,7 @@ describe('TmuxRenderer', () => {
     const fd = openSync(outputPath, 'w');
     openedFds.push(fd);
 
-    const renderer = new TmuxRenderer(() => 'active') as any;
+    const renderer = new TmuxRenderer(() => paneState('active')) as any;
     renderer.outputFd = fd;
     await renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
 
@@ -152,7 +156,7 @@ describe('TmuxRenderer', () => {
     const renderer = new TmuxRenderer(() => {
       calls += 1;
       if (calls === 1) throw new Error('temporary tmux failure');
-      return 'active';
+      return paneState('active');
     }) as any;
     renderer.outputFd = fd;
 
@@ -171,7 +175,7 @@ describe('TmuxRenderer', () => {
     const fd = openSync(outputPath, 'w');
     openedFds.push(fd);
 
-    const renderer = new TmuxRenderer(() => 'active') as any;
+    const renderer = new TmuxRenderer(() => paneState('active')) as any;
     renderer.outputFd = -1;
 
     await expect(
@@ -195,7 +199,7 @@ describe('TmuxRenderer', () => {
     const fd = openSync(outputPath, 'w');
     openedFds.push(fd);
 
-    const renderer = new TmuxRenderer(() => 'active') as any;
+    const renderer = new TmuxRenderer(() => paneState('active')) as any;
     renderer.outputFd = fd;
     await renderer.renderPng(Buffer.from([1]), 50, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
 
@@ -212,6 +216,54 @@ describe('TmuxRenderer', () => {
     const output = readFileSync(outputPath, 'utf8');
     expect(output.includes('a=d,d=I,i=50')).toBe(true);
     expect(renderer.displayedImageBySlot.get(7)).toBe(77);
+    renderer.close();
+  });
+
+  test('keeps polling and replays retained images when the viewing client changes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'awrit-tmux-renderer-'));
+    tempDirs.push(dir);
+    const outputPath = join(dir, 'out.txt');
+    const fd = openSync(outputPath, 'w');
+    openedFds.push(fd);
+    let viewers = 'client-a';
+
+    const renderer = new TmuxRenderer(() => paneState('active', viewers)) as any;
+    renderer.outputFd = fd;
+    await renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
+    await renderer.checkVisibilityAndFlush();
+
+    expect(renderer.visibilityTimer).not.toBeNull();
+    viewers = 'client-b';
+    await renderer.checkVisibilityAndFlush();
+
+    const output = readFileSync(outputPath, 'utf8');
+    expect(output.match(/a=T,i=77/g)?.length).toBe(3);
+    renderer.close();
+  });
+
+  test('retries the newest repaint received during an output failure', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'awrit-tmux-renderer-'));
+    tempDirs.push(dir);
+    const outputPath = join(dir, 'out.txt');
+    const fd = openSync(outputPath, 'w');
+    openedFds.push(fd);
+
+    const renderer = new TmuxRenderer(() => paneState('active')) as any;
+    renderer.outputFd = -1;
+    await expect(
+      renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7),
+    ).rejects.toThrow();
+
+    await renderer.renderPng(Buffer.from([2]), 88, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
+    expect(renderer.latestBySlot.get(7)?.imageId).toBe(88);
+    expect(renderer.pendingBySlot.get(7)?.imageId).toBe(88);
+
+    renderer.outputFd = fd;
+    await renderer.checkVisibilityAndFlush();
+
+    const output = readFileSync(outputPath, 'utf8');
+    expect(output.includes('a=T,i=88')).toBe(true);
+    expect(output.includes('a=T,i=77')).toBe(false);
     renderer.close();
   });
 });

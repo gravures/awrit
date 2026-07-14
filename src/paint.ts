@@ -49,36 +49,8 @@ function createTmuxRenderer(): TmuxPaintRenderer | null {
 
 const tmuxRenderer = createTmuxRenderer();
 const allocateTmuxImageId = createImageIdAllocator();
-const TMUX_RENDER_RETRY_BASE_MS = 250;
-const TMUX_RENDER_RETRY_MAX_MS = 5_000;
-let tmuxRendererFailures = 0;
-let tmuxRendererRetryAfter = 0;
-
-function canRenderWithTmux(now = Date.now()) {
-  return now >= tmuxRendererRetryAfter;
-}
-
-function noteTmuxRendererSuccess() {
-  if (tmuxRendererFailures > 0 && options['debug-paint']) {
-    console_.error('tmux renderer recovered');
-  }
-  tmuxRendererFailures = 0;
-  tmuxRendererRetryAfter = 0;
-}
-
-function handleTmuxRendererFailure(error: unknown) {
-  tmuxRendererFailures += 1;
-  const delayMs = Math.min(
-    TMUX_RENDER_RETRY_BASE_MS * 2 ** (tmuxRendererFailures - 1),
-    TMUX_RENDER_RETRY_MAX_MS,
-  );
-  tmuxRendererRetryAfter = Date.now() + delayMs;
-  console_.error(`tmux renderer paint failed; retrying in ${delayMs}ms`, error);
-}
 
 export function closeTmuxRenderer() {
-  tmuxRendererFailures = 0;
-  tmuxRendererRetryAfter = 0;
   tmuxRenderer?.close();
 }
 
@@ -186,7 +158,6 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
 
   async function paint(_: any, _dirty: Rectangle, image: NativeImage) {
     if (!tmuxRenderer) return;
-    if (!canRenderWithTmux()) return;
     if (options['no-paint']) return;
 
     try {
@@ -212,9 +183,8 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
 
       const imageId = allocateTmuxImageId();
       await tmuxRenderer.renderPng(image.toPNG(), imageId, cols, rows, startCol, startRow, pane, slotId);
-      noteTmuxRendererSuccess();
     } catch (error) {
-      handleTmuxRendererFailure(error);
+      console_.error('tmux renderer paint failed; retained frame queued for retry', error);
     }
   }
 

@@ -35,27 +35,44 @@ restore_tmux_passthrough() {
   exit "$status"
 }
 
-if [[ -n "${TMUX:-}" && "${TMUX_PANE:-}" =~ ^%[0-9]+$ ]]; then
-  AWRIT_TMUX_LOCAL_PASSTHROUGH="$(
-    tmux show-options -p -v -t "$TMUX_PANE" allow-passthrough 2>/dev/null || true
-  )"
-  AWRIT_TMUX_EFFECTIVE_PASSTHROUGH="$(
-    tmux show-options -p -A -v -t "$TMUX_PANE" allow-passthrough 2>/dev/null || true
-  )"
-  if [[ "$AWRIT_TMUX_EFFECTIVE_PASSTHROUGH" =~ ^(on|off|all)$ ]]; then
-    if [[ "$AWRIT_TMUX_LOCAL_PASSTHROUGH" =~ ^(on|off|all)$ ]]; then
-      AWRIT_TMUX_PASSTHROUGH_RESTORE_MODE=local
-      AWRIT_TMUX_PREVIOUS_PASSTHROUGH="$AWRIT_TMUX_LOCAL_PASSTHROUGH"
-    else
-      AWRIT_TMUX_PASSTHROUGH_RESTORE_MODE=inherit
-      AWRIT_TMUX_PREVIOUS_PASSTHROUGH=""
-    fi
-    if tmux set-option -p -t "$TMUX_PANE" allow-passthrough all; then
-      trap restore_tmux_passthrough EXIT
-      "$BUN" run "$BASE_DIR/src/runner" "$@" 2>"$BASE_DIR/awrit_error.txt"
-      exit $?
-    fi
+if [[ -n "${TMUX:-}" ]]; then
+  if [[ ! "${TMUX_PANE:-}" =~ ^%[0-9]+$ ]]; then
+    echo "awrit: refusing tmux launch with an invalid TMUX_PANE" >&2
+    exit 1
   fi
+  if ! AWRIT_TMUX_LOCAL_PASSTHROUGH="$(
+    tmux show-options -p -v -t "$TMUX_PANE" allow-passthrough 2>/dev/null
+  )"; then
+    echo "awrit: unable to read pane-local tmux passthrough" >&2
+    exit 1
+  fi
+  if ! AWRIT_TMUX_EFFECTIVE_PASSTHROUGH="$(
+    tmux show-options -p -A -v -t "$TMUX_PANE" allow-passthrough 2>/dev/null
+  )"; then
+    echo "awrit: unable to read effective tmux passthrough" >&2
+    exit 1
+  fi
+  if [[ ! "$AWRIT_TMUX_EFFECTIVE_PASSTHROUGH" =~ ^(on|off|all)$ ]]; then
+    echo "awrit: tmux returned an invalid effective passthrough value" >&2
+    exit 1
+  fi
+  if [[ -z "$AWRIT_TMUX_LOCAL_PASSTHROUGH" ]]; then
+    AWRIT_TMUX_PASSTHROUGH_RESTORE_MODE=inherit
+    AWRIT_TMUX_PREVIOUS_PASSTHROUGH=""
+  elif [[ "$AWRIT_TMUX_LOCAL_PASSTHROUGH" =~ ^(on|off|all)$ ]]; then
+    AWRIT_TMUX_PASSTHROUGH_RESTORE_MODE=local
+    AWRIT_TMUX_PREVIOUS_PASSTHROUGH="$AWRIT_TMUX_LOCAL_PASSTHROUGH"
+  else
+    echo "awrit: tmux returned an invalid pane-local passthrough value" >&2
+    exit 1
+  fi
+  if ! tmux set-option -p -t "$TMUX_PANE" allow-passthrough all; then
+    echo "awrit: unable to enable pane-local tmux passthrough" >&2
+    exit 1
+  fi
+  trap restore_tmux_passthrough EXIT
+  "$BUN" run "$BASE_DIR/src/runner" "$@" 2>"$BASE_DIR/awrit_error.txt"
+  exit $?
 fi
 
 exec -a awrit "$BUN" run "$BASE_DIR/src/runner" "$@" 2>"$BASE_DIR/awrit_error.txt"

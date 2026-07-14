@@ -36,6 +36,9 @@ command="${1:-}"
   printf ' <%s>' "$@"
   printf '\n'
 } >>"$AWRIT_TEST_TMUX_LOG"
+if [[ "${AWRIT_TEST_TMUX_FAIL_COMMAND:-}" == "$command" ]]; then
+  exit 55
+fi
 if [[ "$command" == "show-options" ]]; then
   if [[ " $* " == *" -A "* ]]; then
     printf '%s\n' "${AWRIT_TEST_TMUX_EFFECTIVE_PASSTHROUGH:-on}"
@@ -107,6 +110,42 @@ if (
   pass "tmux passthrough restores an existing pane-local override"
 else
   fail "tmux passthrough restores an existing pane-local override"
+fi
+
+QUERY_FAILURE_BUN_LOG="$TEMP_DIR/query-failure-bun.log"
+if ! (
+  cd "$workdir"
+  PATH="$FAKE_BIN:/usr/bin:/bin" TMUX=/tmp/tmux TMUX_PANE=%42 \
+    AWRIT_TEST_TMUX_FAIL_COMMAND=show-options AWRIT_TEST_BUN_LOG="$QUERY_FAILURE_BUN_LOG" \
+    AWRIT_TEST_TMUX_LOG="$TMUX_LOG" "$COPY/awrit" --help >/dev/null 2>&1
+) && [[ ! -e "$QUERY_FAILURE_BUN_LOG" ]]; then
+  pass "tmux launch fails closed when passthrough cannot be queried"
+else
+  fail "tmux launch fails closed when passthrough cannot be queried"
+fi
+
+SET_FAILURE_BUN_LOG="$TEMP_DIR/set-failure-bun.log"
+if ! (
+  cd "$workdir"
+  PATH="$FAKE_BIN:/usr/bin:/bin" TMUX=/tmp/tmux TMUX_PANE=%42 \
+    AWRIT_TEST_TMUX_FAIL_COMMAND=set-option AWRIT_TEST_BUN_LOG="$SET_FAILURE_BUN_LOG" \
+    AWRIT_TEST_TMUX_LOG="$TMUX_LOG" "$COPY/awrit" --help >/dev/null 2>&1
+) && [[ ! -e "$SET_FAILURE_BUN_LOG" ]]; then
+  pass "tmux launch fails closed when passthrough cannot be enabled"
+else
+  fail "tmux launch fails closed when passthrough cannot be enabled"
+fi
+
+INVALID_PANE_BUN_LOG="$TEMP_DIR/invalid-pane-bun.log"
+if ! (
+  cd "$workdir"
+  PATH="$FAKE_BIN:/usr/bin:/bin" TMUX=/tmp/tmux TMUX_PANE=invalid \
+    AWRIT_TEST_BUN_LOG="$INVALID_PANE_BUN_LOG" AWRIT_TEST_TMUX_LOG="$TMUX_LOG" \
+    "$COPY/awrit" --help >/dev/null 2>&1
+) && [[ ! -e "$INVALID_PANE_BUN_LOG" ]]; then
+  pass "tmux launch fails closed with an invalid pane identity"
+else
+  fail "tmux launch fails closed with an invalid pane identity"
 fi
 
 if PATH="$FAKE_BIN:/usr/bin:/bin" AWRIT_TEST_BUN_LOG="$BUN_DIRECT_LOG" \

@@ -7,6 +7,11 @@ type TmuxPaneSize = {
 
 export type TmuxPaneStatus = 'active' | 'inactive' | 'invisible';
 
+export type TmuxPaneState = {
+  status: TmuxPaneStatus;
+  viewers: string;
+};
+
 export function isTmuxSession() {
   return Boolean(process.env.TMUX && process.env.TMUX_PANE);
 }
@@ -92,22 +97,40 @@ export function getPaneSize(): TmuxPaneSize {
   return size;
 }
 
-export function getPaneStatus(): TmuxPaneStatus {
+function normalizeViewerIds(viewers: string) {
+  return viewers
+    .split(',')
+    .map((viewer) => viewer.trim())
+    .filter(Boolean)
+    .sort()
+    .join(',');
+}
+
+export function getPaneState(): TmuxPaneState {
   const pane = getPaneId();
   const status = runTmux([
     'display-message',
     '-t',
     pane,
     '-p',
-    '#{window_active_clients} #{pane_active} #{window_zoomed_flag}',
+    '#{window_active_clients}|#{window_active_clients_list}|#{pane_active}|#{window_zoomed_flag}',
   ]);
-  const [viewersRaw, paneActive, windowZoomed] = status.split(/\s+/);
-  const viewers = Number(viewersRaw);
-  if (!Number.isInteger(viewers) || viewers <= 0) return 'invisible';
-  if (windowZoomed === '1' && paneActive === '0') return 'invisible';
-  if (paneActive === '1') return 'active';
-  if (paneActive === '0') return 'inactive';
-  return 'invisible';
+  const [viewerCountRaw, viewerIdsRaw = '', paneActive, windowZoomed] = status.split('|');
+  const viewerCount = Number(viewerCountRaw);
+  const viewers = normalizeViewerIds(viewerIdsRaw) || `count:${viewerCountRaw}`;
+  if (!Number.isInteger(viewerCount) || viewerCount <= 0) {
+    return { status: 'invisible', viewers: '' };
+  }
+  if (windowZoomed === '1' && paneActive === '0') {
+    return { status: 'invisible', viewers };
+  }
+  if (paneActive === '1') return { status: 'active', viewers };
+  if (paneActive === '0') return { status: 'inactive', viewers };
+  return { status: 'invisible', viewers };
+}
+
+export function getPaneStatus(): TmuxPaneStatus {
+  return getPaneState().status;
 }
 
 export function tmuxWrap(sequence: string, layers = 1) {

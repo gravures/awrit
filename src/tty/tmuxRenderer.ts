@@ -5,7 +5,7 @@ import {
   buildTmuxPlaceholderLines,
   buildTmuxUploadCommands,
 } from './tmuxProtocol';
-import { getPaneStatus, type TmuxPaneStatus } from './tmux';
+import { getPaneState, type TmuxPaneState } from './tmux';
 
 type PaneBounds = {
   cols: number;
@@ -42,14 +42,15 @@ export class TmuxRenderer {
   private displayedImageBySlot: Map<number, number>;
   private flushInProgress: boolean;
   private flushPromise: Promise<void>;
-  private paneStatus: () => TmuxPaneStatus;
-  private currentPaneStatus: TmuxPaneStatus | null;
+  private paneState: () => TmuxPaneState;
+  private currentPaneState: TmuxPaneState | null;
   private visibilityTimer: ReturnType<typeof setTimeout> | null;
+  private visibilityTimerDueAt: number | null;
   private needsVisibilityConfirmation: boolean;
   private retryRequired: boolean;
   private closed: boolean;
 
-  constructor(paneStatus: () => TmuxPaneStatus = getPaneStatus) {
+  constructor(paneState: () => TmuxPaneState = getPaneState) {
     this.outputFd = process.stdout.fd;
     this.dumpPlaceholdersPath = options['tmux-dump']
       ? '/tmp/awrit-tmux-placeholders.log'
@@ -60,9 +61,10 @@ export class TmuxRenderer {
     this.displayedImageBySlot = new Map();
     this.flushInProgress = false;
     this.flushPromise = Promise.resolve();
-    this.paneStatus = paneStatus;
-    this.currentPaneStatus = null;
+    this.paneState = paneState;
+    this.currentPaneState = null;
     this.visibilityTimer = null;
+    this.visibilityTimerDueAt = null;
     this.needsVisibilityConfirmation = false;
     this.retryRequired = false;
     this.closed = false;
@@ -72,6 +74,7 @@ export class TmuxRenderer {
     this.closed = true;
     if (this.visibilityTimer) clearTimeout(this.visibilityTimer);
     this.visibilityTimer = null;
+    this.visibilityTimerDueAt = null;
     this.needsVisibilityConfirmation = false;
     this.retryRequired = false;
     this.pendingBySlot.clear();
@@ -86,6 +89,11 @@ export class TmuxRenderer {
   releaseSlot(slotId: number) {
     this.pendingBySlot.delete(slotId);
     this.latestBySlot.delete(slotId);
+    if (this.latestBySlot.size === 0 && this.visibilityTimer) {
+      clearTimeout(this.visibilityTimer);
+      this.visibilityTimer = null;
+      this.visibilityTimerDueAt = null;
+    }
     const displayedImageId = this.displayedImageBySlot.get(slotId);
     if (displayedImageId == null) return;
     this.displayedImageBySlot.delete(slotId);
@@ -101,7 +109,9 @@ export class TmuxRenderer {
 
   private scheduleFlush() {
     if (this.closed || this.pendingBySlot.size === 0) return Promise.resolve();
-    if (this.currentPaneStatus === 'invisible') return Promise.resolve();
+    if (this.currentPaneState?.status === 'invisible' || this.retryRequired) {
+      return Promise.resolve();
+    }
     if (this.flushInProgress) return this.flushPromise;
     this.flushInProgress = true;
     this.flushPromise = Promise.resolve()
@@ -112,27 +122,45 @@ export class TmuxRenderer {
     return this.flushPromise;
   }
 
-  private scheduleVisibilityCheck() {
-    if (this.closed || this.visibilityTimer) return;
-    this.visibilityTimer = setTimeout(() => this.checkVisibilityAndFlush(), 250);
+  private scheduleVisibilityCheck(delayMs = 250) {
+    if (this.closed || this.latestBySlot.size === 0) return;
+    const dueAt = Date.now() + delayMs;
+    if (
+      this.visibilityTimer &&
+      this.visibilityTimerDueAt != null &&
+      this.visibilityTimerDueAt <= dueAt
+    ) {
+      return;
+    }
+    if (this.visibilityTimer) clearTimeout(this.visibilityTimer);
+    this.visibilityTimerDueAt = dueAt;
+    this.visibilityTimer = setTimeout(() => {
+      this.visibilityTimer = null;
+      this.visibilityTimerDueAt = null;
+      void this.checkVisibilityAndFlush();
+    }, delayMs);
     this.visibilityTimer.unref();
   }
 
   private async checkVisibilityAndFlush() {
     if (this.visibilityTimer) clearTimeout(this.visibilityTimer);
     this.visibilityTimer = null;
+    this.visibilityTimerDueAt = null;
     if (this.closed) return;
 
-    const previousStatus = this.currentPaneStatus;
+    const previousState = this.currentPaneState;
     try {
-      this.currentPaneStatus = this.paneStatus();
+      this.currentPaneState = this.paneState();
     } catch {
-      this.currentPaneStatus = 'invisible';
+      this.currentPaneState = { status: 'invisible', viewers: '' };
     }
 
+    const viewersChanged =
+      previousState != null && previousState.viewers !== this.currentPaneState.viewers;
     if (
-      this.currentPaneStatus !== 'invisible' &&
-      (previousStatus === 'invisible' ||
+      this.currentPaneState.status !== 'invisible' &&
+      (previousState?.status === 'invisible' ||
+        viewersChanged ||
         this.needsVisibilityConfirmation ||
         this.retryRequired)
     ) {
@@ -146,14 +174,21 @@ export class TmuxRenderer {
       } catch {
         // writeAll marks transient output failures for another visible retry.
         // Deterministic protocol errors remain with the caller's paint retry.
-        if (this.retryRequired) this.currentPaneStatus = 'invisible';
+        if (this.retryRequired) {
+          this.currentPaneState = { status: 'invisible', viewers: '' };
+        }
       }
     }
 
-    // Visible panes need only one confirmation after each repaint. Hidden
-    // panes and transient output failures keep polling until replay succeeds.
-    if (this.currentPaneStatus === 'invisible' || this.retryRequired) {
-      this.scheduleVisibilityCheck();
+    // Keep a low-rate identity poll while retained frames exist. Tmux does not
+    // preserve Kitty uploads in the pane grid, so a newly attached client must
+    // receive the latest payload even when the page itself is static.
+    if (this.latestBySlot.size > 0) {
+      const needsFastPoll =
+        this.currentPaneState.status === 'invisible' ||
+        this.retryRequired ||
+        this.needsVisibilityConfirmation;
+      this.scheduleVisibilityCheck(needsFastPoll ? 250 : 1_000);
     }
   }
 
@@ -246,16 +281,16 @@ export class TmuxRenderer {
     };
     this.latestBySlot.set(slotId, request);
     this.pendingBySlot.set(slotId, request);
-    if (this.currentPaneStatus == null) {
+    if (this.currentPaneState == null) {
       try {
-        this.currentPaneStatus = this.paneStatus();
+        this.currentPaneState = this.paneState();
       } catch {
         // Pane-scoped passthrough is `all`; rendering is safer than stranding
         // the retained frame when a status query fails transiently.
-        this.currentPaneStatus = 'active';
+        this.currentPaneState = { status: 'active', viewers: 'unknown' };
       }
     }
-    if (this.currentPaneStatus === 'invisible') {
+    if (this.currentPaneState.status === 'invisible') {
       this.scheduleVisibilityCheck();
       return Promise.resolve();
     }
