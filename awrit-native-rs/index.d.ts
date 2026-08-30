@@ -21,6 +21,9 @@ export interface DirtyRect {
 /** Get the current terminal window size */
 export declare function getWindowSize(): WindowSize
 
+/** Returns true if called inside a Tmux session, false otherwise. */
+export declare function isTmux(): boolean
+
 export interface KeyEvent {
   /** Key code in Electron accelerator format (lowercase) */
   code: string
@@ -47,6 +50,9 @@ export interface MouseEvent {
   /** Array of modifier strings in Electron accelerator format */
   modifiers: ('ctrl' | 'alt' | 'shift')[]
 }
+
+/** Send the given sequence directly to the client terminal passing through tmux */
+export declare function passthroughTmux(sequence: string): void
 
 export interface SupportedFeatures {
   keyboard: boolean
@@ -86,3 +92,5 @@ export interface WindowSize {
   width: number
   height: number
 }
+
+export declare function writeMaybeTmux(sequence: string): void
