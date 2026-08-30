@@ -64,10 +64,10 @@ pub fn tmux_passthrough(buffer: &[u8]) -> std::io::Result<Vec<u8>> {
     Ok(_tmux_escape(&str_, TMUX_BEGIN, TMUX_END).into_bytes())
 }
 
-/// ?
+/// A wrapper that routes ANSI sequence writes through tmux passthrough when inside tmux.
 #[cfg(unix)]
 pub struct MaybeTmux {
-    pub write: fn(),
+    pub write: fn(&str),
 }
 
 impl MaybeTmux {
@@ -82,11 +82,12 @@ impl MaybeTmux {
     }
 
     fn _write(sequence: &str) {
-        //
+        // No-op: write directly without tmux passthrough
+        let _ = sequence;
     }
 
     fn _write_tmux(sequence: &str) {
-        tmux_passthrough(sequence)
+        let _ = tmux_passthrough(sequence.as_bytes());
     }
 }
 
