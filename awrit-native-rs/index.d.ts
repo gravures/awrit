@@ -21,6 +21,11 @@ export declare function termEnableFeatures(): SupportedFeatures
 export declare function termDisableFeatures(features: SupportedFeatures): void
 /** Get the current terminal window size */
 export declare function getWindowSize(): WindowSize
+/** Returns true if called inside a Tmux session, false otherwise. */
+export declare function isTmux(): boolean
+/** Send the given sequence directly to the client terminal passing through tmux */
+export declare function passthroughTmux(sequence: string): void
+export declare function writeMaybeTmux(sequence: string): void
 export type TermEvent =
   { eventType: 'key', keyEvent: KeyEvent } |
   { eventType: 'mouse', mouseEvent: MouseEvent } |
