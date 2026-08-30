@@ -245,5 +245,8 @@ pub mod terminal;
 /// A module to query if the current instance is a tty.
 pub mod tty;
 
+/// A module to deal with tmux session.
+pub mod tmux;
+
 mod command;
 pub(crate) mod macros;
