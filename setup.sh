@@ -86,6 +86,18 @@ if [ ! -d "$BUN_INSTALL_DIR" ]; then
   rm -r "$BUN_BIN_DIR/bun-$target" "$BUN_EXE.zip"
 fi
 
+# If bun's extract-zip keeps failing,
+# fall back to the system `unzip` against the cached zip:
+ELECTRON_DIR="$BASE_DIR/node_modules/electron"
+if [ ! -f "$ELECTRON_DIR/path.txt" ]; then
+  CACHED_ZIP=$(find ~/.cache/electron/ -name "electron-*.zip" -print -quit 2>/dev/null)
+  if [ -n "$CACHED_ZIP" ]; then
+    echo "Extracting electron from cache using system unzip..."
+    unzip -o "$CACHED_ZIP" -d "$ELECTRON_DIR/dist/"
+    printf 'electron' >"$ELECTRON_DIR/path.txt"
+  fi
+fi
+
 if [ ! -d "$BASE_DIR/node_modules" ]; then
   (cd awrit-native-rs && "$BUN_EXE" scripts/download-binary.js)
   "$BUN_EXE" install
