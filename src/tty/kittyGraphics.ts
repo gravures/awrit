@@ -3,6 +3,7 @@ import type { Rect, Size } from './graphics';
 import { options } from '../args';
 import type { ShmGraphicBuffer } from 'awrit-native-rs';
 import { placeCursor } from './output';
+import { writeMaybeTmux } from 'awrit-native-rs';
 const { stdout } = process;
 
 let imageId_ = 1;
@@ -25,7 +26,7 @@ function rect_(rect: Rect) {
 function shmRgba_(nameBase64: string, size: Size, control: string) {
   // f=32 rgba 32-bit
   // t=s SHM name
-  stdout.write(GFX`f=32,t=s${sv_size_(size)},${control};${nameBase64}`);
+  writeMaybeTmux(GFX`f=32,t=s${sv_size_(size)},${control};${nameBase64}`);
 }
 
 function paintBitmap(name: string, size: Size, control?: string) {
@@ -53,7 +54,7 @@ export function paintInitialFrame(buffer: ShmGraphicBuffer, size: Size): Initial
   // paint and transfer first frame
   paintBitmap(buffer.nameBase64, size, `i=${id}`);
   // pause at the first frame
-  stdout.write(GFX`a=a,i=${id},c=1`);
+  writeMaybeTmux(GFX`a=a,i=${id},c=1`);
 
   return {
     size,
@@ -78,7 +79,7 @@ function loadFrame(id: ImageId, frame: number, nameBase64: string, size: Size): 
 
 function deleteFrame(id: ImageId, frame: number) {
   // a=d,d=F delete animation frame, freeing data
-  stdout.write(GFX`a=d,d=f,i=${id},r=${frame}`);
+  writeMaybeTmux(GFX`a=d,d=f,i=${id},r=${frame}`);
 }
 
 function compositeFrame(
@@ -89,18 +90,18 @@ function compositeFrame(
 ) {
   // a=c composite animation frame
   // C=1 replace pixels (src copy)
-  stdout.write(
+  writeMaybeTmux(
     GFX`a=c${quiet},C=1,i=${id},r=${sourceFrame},c=${destinationFrame}${rect_(destinationRect)}`,
   );
 }
 
 export function clearPlacements() {
-  stdout.write(GFX`a=d,d=A`);
+  writeMaybeTmux(GFX`a=d,d=A`);
 }
 
 function freeImage(id: ImageId) {
   // a=d,d=I delete image
-  stdout.write(GFX`a=d,d=I,i=${id}`);
+  writeMaybeTmux(GFX`a=d,d=I,i=${id}`);
 }
 
 // Ghostty and probably most other terminals only support a very small
@@ -117,7 +118,10 @@ export interface PaintedImage {
 export function paintImage(
   buffer: ShmGraphicBuffer,
   size: Size,
-  position: { x: { cell: number; px: number }; y: { cell: number; px: number } },
+  position: {
+    x: { cell: number; px: number };
+    y: { cell: number; px: number };
+  },
 ): PaintedImage {
   const id = imageId();
   placeCursor({ x: position.x.cell, y: position.y.cell });
