@@ -5,6 +5,8 @@ import { resolve, join } from 'node:path';
 import { colorsToTailwind, queryColors } from './kittyColors';
 import { server } from './devServer';
 import { getDisplayScale } from '../dpi';
+import { exec } from 'node:child_process';
+import { isTmux } from 'awrit-native-rs';
 
 const { stdout } = process;
 
@@ -97,6 +99,22 @@ if (!(await distVersion.exists()) || (await distVersion.text()) !== version || o
 const children: [string, Subprocess][] = [];
 const isDev = options.dev;
 
+// Tmux support
+const inTmux = isTmux();
+const EXT_KEYS_FMT = 'xterm';
+let tmux_ext_keys_format: string;
+
+if (inTmux) {
+  exec('tmux show-options -pv extended-keys-format', (error, stdout, _) => {
+    if (error) {
+      tmux_ext_keys_format = EXT_KEYS_FMT;
+    }
+    tmux_ext_keys_format = stdout;
+  });
+  // log(`Setting tmux extended-keys format to <${EXT_KEYS_FMT}>`);
+  exec(`tmux set -p extended-keys-format ${EXT_KEYS_FMT}`);
+}
+
 if (isDev) {
   await server.listen();
 }
@@ -147,6 +165,10 @@ function destroyAllSubprocesses() {
   if (isDev) {
     console.error('stopping dev server');
     server.close();
+  }
+  if (inTmux) {
+    // log(`Reverting tmux extended-keys format to <${tmux_ext_keys_format}>`);
+    exec(`tmux set -p extended-keys-format ${tmux_ext_keys_format}`);
   }
   process.exit(0);
 }
