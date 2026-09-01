@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { console_ } from '../console';
 
 type TmuxPaneSize = {
   cols: number;
@@ -139,4 +140,14 @@ export function tmuxWrap(sequence: string, layers = 1) {
     wrapped = `\x1bPtmux;${wrapped.split('\x1b').join('\x1b\x1b')}\x1b\\`;
   }
   return wrapped;
+}
+
+export function validateAllowPassthrough(): string {
+  const value = getAllowPassthrough();
+  if (value !== 'on' && value !== 'all') {
+    console_.error(
+      `awrit: allow-passthrough is "${value}", images will not render in tmux. Set: tmux set -g allow-passthrough on`,
+    );
+  }
+  return value;
 }
