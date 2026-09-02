@@ -509,7 +509,15 @@ if (!nativeBinding) {
 
 module.exports = nativeBinding
 module.exports.ShmGraphicBuffer = nativeBinding.ShmGraphicBuffer
+module.exports.getTmuxPaneSize = nativeBinding.getTmuxPaneSize
 module.exports.getWindowSize = nativeBinding.getWindowSize
+module.exports.isTmux = nativeBinding.isTmux
 module.exports.listenForInput = nativeBinding.listenForInput
+module.exports.passthroughTmux = nativeBinding.passthroughTmux
 module.exports.termDisableFeatures = nativeBinding.termDisableFeatures
 module.exports.termEnableFeatures = nativeBinding.termEnableFeatures
+module.exports.tmuxBeginPassthrough = nativeBinding.tmuxBeginPassthrough
+module.exports.tmuxEndPassthrough = nativeBinding.tmuxEndPassthrough
+module.exports.tmuxPassthrough = nativeBinding.tmuxPassthrough
+module.exports.tmuxSetExtendedKeysMode = nativeBinding.tmuxSetExtendedKeysMode
+module.exports.writeMaybeTmux = nativeBinding.writeMaybeTmux
