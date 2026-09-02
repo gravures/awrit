@@ -5,3 +5,7 @@ out
 *.log*
 .bun
 awrit_error.txt
+.ua/intermediate/
+.ua/diff-overlay.json
+.grepai/
+/awrit-native-rs/package-lock.json
