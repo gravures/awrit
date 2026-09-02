@@ -212,9 +212,12 @@ fn query_keyboard_enhancement_flags_nonraw() -> io::Result<Option<KeyboardEnhanc
 
 #[cfg(feature = "events")]
 fn query_keyboard_enhancement_flags_raw() -> io::Result<Option<KeyboardEnhancementFlags>> {
-    use crate::event::{
-        filter::{KeyboardEnhancementFlagsFilter, PrimaryDeviceAttributesFilter},
-        poll_internal, read_internal, InternalEvent,
+    use crate::{
+        event::{
+            filter::{KeyboardEnhancementFlagsFilter, PrimaryDeviceAttributesFilter},
+            poll_internal, read_internal, InternalEvent,
+        },
+        tmux::{is_tmux, tmux_passthrough},
     };
     use std::io::Write;
     use std::time::Duration;
@@ -231,12 +234,20 @@ fn query_keyboard_enhancement_flags_raw() -> io::Result<Option<KeyboardEnhanceme
     const QUERY: &[u8] = b"\x1B[?u\x1B[c";
 
     let result = File::open("/dev/tty").and_then(|mut file| {
-        file.write_all(QUERY)?;
+        if is_tmux() {
+            file.write_all(&tmux_passthrough(QUERY)?)?;
+        } else {
+            file.write_all(QUERY)?;
+        }
         file.flush()
     });
     if result.is_err() {
         let mut stdout = io::stdout();
-        stdout.write_all(QUERY)?;
+        if is_tmux() {
+            stdout.write_all(&tmux_passthrough(QUERY)?)?;
+        } else {
+            stdout.write_all(QUERY)?;
+        }
         stdout.flush()?;
     }
 
@@ -342,9 +353,12 @@ pub struct KittyGraphicsSupport {
 /// 2. Animation frame loading
 /// 3. Frame composition
 pub fn query_kitty_graphics_support() -> io::Result<KittyGraphicsSupport> {
-    use crate::event::{
-        filter::KittyGraphicsFilter, poll_internal, read_internal, Event, InternalEvent,
-        KittyGraphicsOkOrError,
+    use crate::{
+        event::{
+            filter::KittyGraphicsFilter, poll_internal, read_internal, Event, InternalEvent,
+            KittyGraphicsOkOrError,
+        },
+        tmux::{is_tmux, tmux_passthrough},
     };
     use std::io::Write;
     use std::time::Duration;
@@ -367,7 +381,11 @@ pub fn query_kitty_graphics_support() -> io::Result<KittyGraphicsSupport> {
     let filter = KittyGraphicsFilter;
 
     // Test 1: Basic image loading
-    stdout.write_all(LOAD_IMAGE)?;
+    if is_tmux() {
+        stdout.write_all(&tmux_passthrough(LOAD_IMAGE)?)?;
+    } else {
+        stdout.write_all(LOAD_IMAGE)?;
+    }
     stdout.flush()?;
 
     if poll_internal(Some(Duration::from_millis(100)), &filter)? {
@@ -378,7 +396,11 @@ pub fn query_kitty_graphics_support() -> io::Result<KittyGraphicsSupport> {
 
     if support.images {
         // Test 2: Frame loading
-        stdout.write_all(LOAD_FRAME)?;
+        if is_tmux() {
+            stdout.write_all(&tmux_passthrough(LOAD_FRAME)?)?;
+        } else {
+            stdout.write_all(LOAD_FRAME)?;
+        }
         stdout.flush()?;
 
         if poll_internal(Some(Duration::from_millis(100)), &filter)? {
@@ -391,7 +413,11 @@ pub fn query_kitty_graphics_support() -> io::Result<KittyGraphicsSupport> {
 
         if support.load_frame {
             // Test 3: Frame composition
-            stdout.write_all(COMPOSITE_FRAMES)?;
+            if is_tmux() {
+                stdout.write_all(&tmux_passthrough(COMPOSITE_FRAMES)?)?;
+            } else {
+                stdout.write_all(COMPOSITE_FRAMES)?;
+            }
             stdout.flush()?;
 
             if poll_internal(Some(Duration::from_millis(100)), &filter)? {

@@ -18,8 +18,14 @@ export interface DirtyRect {
   height: number
 }
 
+/** Get tmux pane size with 250ms caching. Falls back to regular window_size if not in tmux. */
+export declare function getTmuxPaneSize(): WindowSize
+
 /** Get the current terminal window size */
 export declare function getWindowSize(): WindowSize
+
+/** Returns true if called inside a Tmux session, false otherwise. */
+export declare function isTmux(): boolean
 
 export interface KeyEvent {
   /** Key code in Electron accelerator format (lowercase) */
@@ -48,6 +54,9 @@ export interface MouseEvent {
   modifiers: ('ctrl' | 'alt' | 'shift')[]
 }
 
+/** Send the given sequence directly to the client terminal passing through tmux */
+export declare function passthroughTmux(sequence: string): void
+
 export interface SupportedFeatures {
   keyboard: boolean
   images: boolean
@@ -66,19 +75,34 @@ export interface TermEscape {
   text: string
 }
 
-export type TermEvent =
-  { eventType: 'key', keyEvent: KeyEvent } |
-  { eventType: 'mouse', mouseEvent: MouseEvent } |
-  { eventType: 'focus', focusGained?: boolean, focusLost?: boolean } |
-  { eventType: 'resize', resize: TermResize } |
-  { eventType: 'paste', paste: string } |
-  { eventType: 'escape', escape: TermEscape } |
-  { eventType: 'graphics', graphics: KittyGraphics }
+export interface TermEvent {
+  eventType: 'key' | 'mouse' | 'focus' | 'resize' | 'paste' | 'escape' | 'graphics'
+  keyEvent?: KeyEvent
+  mouseEvent?: MouseEvent
+  focusGained?: boolean
+  focusLost?: boolean
+  resize?: TermResize
+  paste?: string
+  escape?: TermEscape
+  graphics?: KittyGraphics
+}
 
 export interface TermResize {
   columns: number
   rows: number
 }
+
+/** Returns the DCS sequence to begin tmux passthrough */
+export declare function tmuxBeginPassthrough(): string
+
+/** Returns the DCS sequence to end tmux passthrough */
+export declare function tmuxEndPassthrough(): string
+
+/** Wrap a string with tmux passthrough DCS sequences, escaping ESC characters */
+export declare function tmuxPassthrough(buffer: string): string
+
+/** Returns the CSI sequence for the requested tmux extended-keys mode */
+export declare function tmuxSetExtendedKeysMode(mode: string): string
 
 export interface WindowSize {
   cols: number
@@ -86,3 +110,5 @@ export interface WindowSize {
   width: number
   height: number
 }
+
+export declare function writeMaybeTmux(sequence: string): void
