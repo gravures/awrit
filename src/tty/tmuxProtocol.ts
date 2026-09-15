@@ -1,6 +1,6 @@
 import { GFX } from './escapeCodes';
 import { ROW_COLUMN_DIACRITICS } from './rowColumnDiacritics';
-import { tmuxWrap } from './tmux';
+import { wrapTmuxPassthrough } from 'awrit-native-rs';
 
 export const TMUX_IMAGE_PLACEHOLDER = '\u{10eeee}';
 const DEFAULT_CHUNK_BYTES = 3072; // 4096 base64 chars
@@ -44,13 +44,13 @@ export function buildTmuxUploadCommands(
       control = `a=T,i=${id},f=100,${control},U=1,c=${cols},r=${rows}`;
       first = false;
     }
-    commands.push(tmuxWrap(GFX`${control};${chunk.toString('base64')}`));
+    commands.push(wrapTmuxPassthrough(GFX`${control};${chunk.toString('base64')}`));
   }
   return commands;
 }
 
 export function buildTmuxDeleteImageCommand(id: number) {
-  return tmuxWrap(GFX`a=d,d=I,i=${id}`);
+  return wrapTmuxPassthrough(GFX`a=d,d=I,i=${id}`);
 }
 
 export function buildTmuxPlaceholderLines(

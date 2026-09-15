@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { console_ } from '../console';
+import { isTmux } from 'awrit-native-rs';
 
 type TmuxPaneSize = {
   cols: number;
@@ -14,7 +15,7 @@ export type TmuxPaneState = {
 };
 
 export function isTmuxSession() {
-  return Boolean(process.env.TMUX && process.env.TMUX_PANE);
+  return isTmux();
 }
 
 function runTmux(args: readonly string[]) {
@@ -132,14 +133,6 @@ export function getPaneState(): TmuxPaneState {
 
 export function getPaneStatus(): TmuxPaneStatus {
   return getPaneState().status;
-}
-
-export function tmuxWrap(sequence: string, layers = 1) {
-  let wrapped = sequence;
-  for (let layer = 0; layer < layers; layer++) {
-    wrapped = `\x1bPtmux;${wrapped.split('\x1b').join('\x1b\x1b')}\x1b\\`;
-  }
-  return wrapped;
 }
 
 export function validateAllowPassthrough(): string {
