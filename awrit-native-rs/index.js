@@ -520,4 +520,5 @@ module.exports.tmuxBeginPassthrough = nativeBinding.tmuxBeginPassthrough
 module.exports.tmuxEndPassthrough = nativeBinding.tmuxEndPassthrough
 module.exports.tmuxPassthrough = nativeBinding.tmuxPassthrough
 module.exports.tmuxSetExtendedKeysMode = nativeBinding.tmuxSetExtendedKeysMode
+module.exports.wrapTmuxPassthrough = nativeBinding.wrapTmuxPassthrough
 module.exports.writeMaybeTmux = nativeBinding.writeMaybeTmux

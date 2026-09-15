@@ -235,6 +235,16 @@ pub fn tmux_passthrough(buffer: String) -> napi::Result<String> {
 }
 
 #[napi]
+/// Wrap a sequence with tmux passthrough DCS sequences in one call
+pub fn wrap_tmux_passthrough(sequence: String) -> String {
+  let mut s = String::new();
+  TmuxBeginPassthrough.write_ansi(&mut s).unwrap();
+  s.push_str(&tmux_escape(&sequence));
+  TmuxEndPassthrough.write_ansi(&mut s).unwrap();
+  s
+}
+
+#[napi]
 /// Returns the CSI sequence for the requested tmux extended-keys mode
 pub fn tmux_set_extended_keys_mode(mode: String) -> napi::Result<String> {
   let m = match mode.as_str() {
