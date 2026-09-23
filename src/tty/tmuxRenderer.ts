@@ -202,7 +202,7 @@ export class TmuxRenderer {
 
       let output = SYNC_BEGIN;
       for (const request of batch) {
-        const uploadCommands = buildTmuxUploadCommands(
+        const { upload: uploadCommands, placement } = buildTmuxUploadCommands(
           request.pngBuffer,
           request.imageId,
           request.cols,
@@ -222,6 +222,11 @@ export class TmuxRenderer {
           if (this.dumpGfxPath) {
             fs.appendFileSync(this.dumpGfxPath, `${wrapped}\n`);
           }
+        }
+
+        output += placement;
+        if (this.dumpGfxPath) {
+          fs.appendFileSync(this.dumpGfxPath, `${placement}\n`);
         }
 
         for (const line of placeholderLines) {

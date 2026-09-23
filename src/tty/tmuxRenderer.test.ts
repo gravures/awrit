@@ -96,7 +96,8 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
-    expect(output.includes('a=T,i=77')).toBe(true);
+    expect(output.includes('a=t,i=77')).toBe(true);
+    expect(output.includes('a=p,i=77')).toBe(true);
     expect(renderer.pendingBySlot.size).toBe(0);
 
     renderer.close();
@@ -120,7 +121,7 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
-    expect(output.match(/a=T,i=77/g)?.length).toBe(2);
+    expect(output.match(/a=t,i=77/g)?.length).toBe(2);
 
     renderer.close();
   });
@@ -141,7 +142,7 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
-    expect(output.match(/a=T,i=77/g)?.length).toBe(2);
+    expect(output.match(/a=t,i=77/g)?.length).toBe(2);
     renderer.close();
   });
 
@@ -164,7 +165,7 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
-    expect(output.match(/a=T,i=77/g)?.length).toBe(2);
+    expect(output.match(/a=t,i=77/g)?.length).toBe(2);
     renderer.close();
   });
 
@@ -187,7 +188,7 @@ describe('TmuxRenderer', () => {
     renderer.outputFd = fd;
     await renderer.checkVisibilityAndFlush();
 
-    expect(readFileSync(outputPath, 'utf8').includes('a=T,i=77')).toBe(true);
+    expect(readFileSync(outputPath, 'utf8').includes('a=t,i=77')).toBe(true);
     expect(renderer.displayedImageBySlot.get(7)).toBe(77);
     renderer.close();
   });
@@ -237,7 +238,7 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
-    expect(output.match(/a=T,i=77/g)?.length).toBe(3);
+    expect(output.match(/a=t,i=77/g)?.length).toBe(3);
     renderer.close();
   });
 
@@ -262,8 +263,8 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
-    expect(output.includes('a=T,i=88')).toBe(true);
-    expect(output.includes('a=T,i=77')).toBe(false);
+    expect(output.includes('a=t,i=88')).toBe(true);
+    expect(output.includes('a=t,i=77')).toBe(false);
     renderer.close();
   });
 });
