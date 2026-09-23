@@ -41,7 +41,7 @@ function controlMap(control: string) {
 describe('tmuxProtocol', () => {
   test('buildTmuxUploadCommands chunks payload and wraps for tmux', () => {
     const png = Buffer.alloc(6400, 0x41);
-    const commands = buildTmuxUploadCommands(png, 0x12ab34, 10, 4);
+    const { upload: commands, placement } = buildTmuxUploadCommands(png, 0x12ab34, 10, 4);
 
     expect(commands.length).toBe(3);
     for (const command of commands) {
@@ -57,12 +57,9 @@ describe('tmuxProtocol', () => {
     const middleControl = controlMap(middle.control);
     const lastControl = controlMap(last.control);
 
-    expect(firstControl.get('a')).toBe('T');
+    expect(firstControl.get('a')).toBe('t');
     expect(firstControl.get('q')).toBe('2');
     expect(firstControl.get('f')).toBe('100');
-    expect(firstControl.get('U')).toBe('1');
-    expect(firstControl.get('c')).toBe('10');
-    expect(firstControl.get('r')).toBe('4');
     expect(firstControl.get('m')).toBe('1');
 
     expect(middleControl.get('q')).toBe('2');
@@ -71,6 +68,15 @@ describe('tmuxProtocol', () => {
 
     expect(lastControl.get('q')).toBe('2');
     expect(lastControl.get('m')).toBe('0');
+
+    expect(placement.startsWith('\x1bPtmux;')).toBe(true);
+    expect(placement.endsWith('\x1b\\')).toBe(true);
+    const placementGfx = parseFirstGraphicsCommand(unwrapTmux(placement));
+    const placementCtrl = controlMap(placementGfx.control);
+    expect(placementCtrl.get('a')).toBe('p');
+    expect(placementCtrl.get('U')).toBe('1');
+    expect(placementCtrl.get('c')).toBe('10');
+    expect(placementCtrl.get('r')).toBe('4');
   });
 
   test('buildTmuxPlaceholderLines clips to pane bounds', () => {

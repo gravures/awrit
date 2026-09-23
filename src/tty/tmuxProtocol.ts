@@ -28,7 +28,7 @@ export function buildTmuxUploadCommands(
   cols: number,
   rows: number,
   chunkBytes = DEFAULT_CHUNK_BYTES,
-) {
+): { upload: string[]; placement: string } {
   const commands: string[] = [];
   let offset = 0;
   let first = true;
@@ -41,12 +41,13 @@ export function buildTmuxUploadCommands(
 
     let control = `q=2,m=${more}`;
     if (first) {
-      control = `a=T,i=${id},f=100,${control},U=1,c=${cols},r=${rows}`;
+      control = `a=t,i=${id},f=100,${control}`;
       first = false;
     }
     commands.push(wrapTmuxPassthrough(GFX`${control};${chunk.toString('base64')}`));
   }
-  return commands;
+  const placement = wrapTmuxPassthrough(GFX`a=p,i=${id},U=1,c=${cols},r=${rows}`);
+  return { upload: commands, placement };
 }
 
 export function buildTmuxDeleteImageCommand(id: number) {
