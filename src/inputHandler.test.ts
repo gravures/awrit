@@ -1,9 +1,47 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
 import {
   getForcedTmuxMouseCoordinateMode,
   nextTmuxMouseCoordinateMode,
   normalizeTmuxMouseCoordinates,
 } from './tty/mouseCoordinates';
+
+// inputHandler imports windows.ts (electron); stub it so the pure wheel helper is testable
+mock.module('./windows', () => ({ focusedView: { current: null } }));
+const { buildWheelEvent } = await import('./inputHandler');
+
+describe('buildWheelEvent', () => {
+  test('scrollUp/scrollDown produce Y-only wheel deltas', () => {
+    expect(buildWheelEvent('scrollUp', [], 0, 0)).toMatchObject({
+      wheelTicksY: 1,
+      wheelTicksX: 0,
+      deltaX: 0,
+      deltaY: 100,
+    });
+    expect(buildWheelEvent('scrollDown', [], 0, 0)).toMatchObject({
+      wheelTicksY: -1,
+      wheelTicksX: 0,
+      deltaX: 0,
+      deltaY: -100,
+    });
+  });
+
+  test('scrollRight/scrollLeft produce X-only wheel deltas', () => {
+    expect(buildWheelEvent('scrollRight', ['shift'], 5, 6)).toMatchObject({
+      wheelTicksX: 1,
+      wheelTicksY: 0,
+      deltaX: 100,
+      deltaY: 0,
+      x: 5,
+      y: 6,
+    });
+    expect(buildWheelEvent('scrollLeft', ['shift'], 5, 6)).toMatchObject({
+      wheelTicksX: -1,
+      wheelTicksY: 0,
+      deltaX: -100,
+      deltaY: 0,
+    });
+  });
+});
 
 describe('inputHandler tmux mouse normalization', () => {
   test('parses forced tmux coordinate mode override', () => {
