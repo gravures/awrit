@@ -77,6 +77,7 @@ describe('tmuxProtocol', () => {
     expect(placementCtrl.get('U')).toBe('1');
     expect(placementCtrl.get('c')).toBe('10');
     expect(placementCtrl.get('r')).toBe('4');
+    expect(placementCtrl.get('q')).toBe('2');
   });
 
   test('buildTmuxPlaceholderLines clips to pane bounds', () => {
@@ -127,6 +128,7 @@ describe('tmuxProtocol', () => {
     expect(control.get('a')).toBe('d');
     expect(control.get('d')).toBe('I');
     expect(control.get('i')).toBe('1234');
+    expect(control.get('q')).toBe('2');
     expect(gfx.payload).toBe('');
   });
 });

@@ -1,12 +1,10 @@
-import { EscapeType, cleanupInput, listenForInput, setupInput } from 'awrit-native';
-import { format } from 'node:util';
+import { listenForInput, type TermEvent } from 'awrit-native-rs';
 import * as out from './output';
 
 let quitListening = () => {};
 
 const cleanup = (signum = 1) => {
   quitListening();
-  cleanupInput();
   out.cleanup();
   process.exit(signum);
 };
@@ -16,14 +14,17 @@ function main() {
   process.on('SIGTERM', cleanup);
   process.on('SIGABRT', cleanup);
   out.setup();
-  setupInput();
   process.stdout.write('Awrit Input Test\r\n');
-  quitListening = listenForInput((evt) => {
-    if (evt.type === EscapeType.Key && evt.code === 'c' && evt.modifiers.includes('ctrl')) {
+  quitListening = listenForInput((evt: TermEvent) => {
+    if (
+      evt.eventType === 'key' &&
+      evt.keyEvent?.code === 'c' &&
+      evt.keyEvent?.modifiers.includes('ctrl')
+    ) {
       quitListening();
       cleanup(0);
     }
-    process.stdout.write(format(evt, '\r\n'));
+    process.stdout.write(`${JSON.stringify(evt)}\r\n`);
   });
 }
 

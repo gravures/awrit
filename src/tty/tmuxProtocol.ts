@@ -46,12 +46,14 @@ export function buildTmuxUploadCommands(
     }
     commands.push(wrapTmuxPassthrough(GFX`${control};${chunk.toString('base64')}`));
   }
-  const placement = wrapTmuxPassthrough(GFX`a=p,i=${id},U=1,c=${cols},r=${rows}`);
+  // q=2: suppress OK/ERR APC replies — tmux has no APC key handler and
+  // shreds them into keystrokes sent to whichever pane is focused.
+  const placement = wrapTmuxPassthrough(GFX`a=p,i=${id},U=1,c=${cols},r=${rows},q=2`);
   return { upload: commands, placement };
 }
 
 export function buildTmuxDeleteImageCommand(id: number) {
-  return wrapTmuxPassthrough(GFX`a=d,d=I,i=${id}`);
+  return wrapTmuxPassthrough(GFX`a=d,d=I,i=${id},q=2`);
 }
 
 export function buildTmuxPlaceholderLines(

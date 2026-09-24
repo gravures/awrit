@@ -30,6 +30,31 @@ function isSimpleMouseEvent(kind: unknown): kind is (typeof mouseEventTypes)[num
   return mouseEventTypes.includes(kind as (typeof mouseEventTypes)[number]);
 }
 
+type ScrollKind = 'scrollUp' | 'scrollDown' | 'scrollLeft' | 'scrollRight';
+
+export function buildWheelEvent(
+  kind: ScrollKind,
+  modifiers: ('ctrl' | 'alt' | 'shift')[],
+  x: number,
+  y: number,
+) {
+  const vertical = kind === 'scrollUp' || kind === 'scrollDown';
+  const sign = kind === 'scrollUp' || kind === 'scrollRight' ? 1 : -1;
+  return {
+    type: 'mouseWheel' as const,
+    wheelTicksY: vertical ? sign : 0,
+    wheelTicksX: vertical ? 0 : sign,
+    deltaX: vertical ? 0 : sign * WHEEL_DELTA,
+    deltaY: vertical ? sign * WHEEL_DELTA : 0,
+    modifiers,
+    x,
+    y,
+    accelerationRatioY: 0.5,
+    hasPreciseScrollingDeltas: false,
+    canScroll: true,
+  };
+}
+
 function getCachedTermSize(now = Date.now()) {
   if (cachedTermSize && now - cachedTermSize.at < TERM_SIZE_CACHE_TTL_MS) {
     return cachedTermSize.size;
@@ -115,20 +140,15 @@ export function handleInput(evt: TermEvent) {
 
       const focusedContent = isInToolbar ? view.toolbar.webContents : view.content.webContents;
 
-      if (kind === 'scrollUp' || kind === 'scrollDown') {
-        view.content.webContents.sendInputEvent({
-          type: 'mouseWheel',
-          wheelTicksY: kind === 'scrollUp' ? 1 : -1,
-          wheelTicksX: 0,
-          deltaX: 0,
-          deltaY: kind === 'scrollUp' ? WHEEL_DELTA : -WHEEL_DELTA,
-          modifiers,
-          x: adjustedX,
-          y: adjustedY,
-          accelerationRatioY: 0.5,
-          hasPreciseScrollingDeltas: false,
-          canScroll: true,
-        });
+      if (
+        kind === 'scrollUp' ||
+        kind === 'scrollDown' ||
+        kind === 'scrollLeft' ||
+        kind === 'scrollRight'
+      ) {
+        view.content.webContents.sendInputEvent(
+          buildWheelEvent(kind, modifiers, adjustedX, adjustedY),
+        );
         break;
       }
 
@@ -165,5 +185,16 @@ export function handleInput(evt: TermEvent) {
       }
       break;
     }
+
+    case 'resize':
+      // Only invalidate the term-size cache; SIGWINCH layout lives in windows.ts
+      cachedTermSize = undefined;
+      break;
+    case 'paste':
+      // paste: bracketed-paste handling lands in plan 05-02
+      break;
+    case 'escape':
+      // no TS consumer yet — crossterm capability queries resolve in Rust
+      break;
   }
 }
