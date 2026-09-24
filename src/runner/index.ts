@@ -5,8 +5,18 @@ import { resolve, join } from 'node:path';
 import { colorsToTailwind, queryColors } from './kittyColors';
 import { server } from './devServer';
 import { getDisplayScale } from '../dpi';
+import fs from 'node:fs';
 
 const { stdout } = process;
+
+// Launcher cannot rename us: tmux path must stay a child (EXIT trap restores
+// passthrough), and exec -a only sets argv[0] — comm resets to the binary name.
+process.title = 'awrit';
+try {
+  fs.writeFileSync('/proc/self/comm', 'awrit');
+} catch {
+  // non-Linux — process.title still covers ps elsewhere
+}
 
 const RESET = '\x1b[0m';
 const DIM_WHITE = '\x1b[0;2m';

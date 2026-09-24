@@ -16,11 +16,11 @@ resolve_link() {
 
 BASE_DIR=$(cd -- "$(dirname -- "$(resolve_link "${BASH_SOURCE:-$0}")")" &>/dev/null && pwd)
 if [ ! -d "$BASE_DIR/node_modules" ]; then
-    "$BASE_DIR/setup.sh"
+  "$BASE_DIR/setup.sh"
 fi
 
 BUN="$BASE_DIR/.bun/bin/bun"
-echo "shim" "$@" > "$BASE_DIR/awrit_error.txt"
+echo "shim" "$@" >"$BASE_DIR/awrit_error.txt"
 
 restore_tmux_passthrough() {
   local status=$?
@@ -75,4 +75,7 @@ if [[ -n "${TMUX:-}" ]]; then
   exit $?
 fi
 
+# rename our process: exec -a only sets argv[0]; comm is set in-process
+# (src/runner, src/index) because the kernel resets comm on exec and the
+# tmux path cannot exec without skipping the passthrough restore trap.
 exec -a awrit "$BUN" run "$BASE_DIR/src/runner" "$@" 2>"$BASE_DIR/awrit_error.txt"
