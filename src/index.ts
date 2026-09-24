@@ -20,6 +20,15 @@ import path from 'node:path';
 import { closeTmuxRenderer } from './paint';
 import { getAllowPassthrough, getTmuxVersion, isTmuxSession, mouseEnabled } from './tty/tmux';
 
+// ps/pane_current_command read /proc/self/comm, which the kernel resets from
+// the binary name on exec — argv[0] alone is not enough. Set after spawn.
+process.title = 'awrit';
+try {
+  fs.writeFileSync('/proc/self/comm', 'awrit');
+} catch {
+  // non-Linux or permission — process.title still covers ps on other platforms
+}
+
 let homepage = 'https://github.com/chase/awrit';
 
 function loadConfig(config: typeof import('../config.js')) {
