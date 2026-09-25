@@ -1,5 +1,6 @@
 import { getWindowSize, type KeyEvent as KeyEventOriginal, type TermEvent } from 'awrit-native-rs';
 import { handleEvent as handleKeyBinding } from './keybindings';
+import { perfCount, perfEnd, perfTime } from './perf';
 import {
   nextTmuxMouseCoordinateMode,
   normalizeTmuxMouseCoordinates,
@@ -94,6 +95,16 @@ function maybeNormalizeTmuxMouseCoordinates(rawX: number, rawY: number) {
 }
 
 export function handleInput(evt: TermEvent) {
+  perfCount(evt.eventType === 'mouse' ? `in.${evt.mouseEvent.kind}` : `in.${evt.eventType}`);
+  const t0 = perfTime();
+  try {
+    handleInputEvent(evt);
+  } finally {
+    perfEnd('in.handler', t0);
+  }
+}
+
+function handleInputEvent(evt: TermEvent) {
   // Focus needs no view; handle before the no-view early return.
   if (evt.eventType === 'focus') {
     // Rust sends focusGained: true on gain, focusGained: undefined on loss.
