@@ -84,32 +84,39 @@ export function registerPaintedContent(
   };
 
   async function paint(_: any, _dirty: Rectangle, image: NativeImage) {
-    const imageSize = image.getSize();
+    try {
+      const imageSize = image.getSize();
 
-    const imageBufferSize = imageSize.width * imageSize.height * 4;
-    if (result.buffer == null) {
-      result.buffer = new ShmGraphicBuffer(imageBufferSize);
-    }
-    if (options['debug-paint']) {
-      console_.error('paint', result.buffer.nameBase64, image.getSize());
-    }
-    if (options['no-paint']) {
-      return;
-    }
-
-    if (result.size != null && imageBufferSize > result.size) {
-      if (options['debug-paint']) {
-        console_.error('replace buffer', result.buffer.nameBase64, result.size, imageBufferSize);
+      const imageBufferSize = imageSize.width * imageSize.height * 4;
+      if (result.buffer == null) {
+        result.buffer = new ShmGraphicBuffer(imageBufferSize);
+        result.size = imageBufferSize;
       }
-      result.buffer = new ShmGraphicBuffer(imageBufferSize);
-      result.size = imageBufferSize;
-    }
+      if (options['debug-paint']) {
+        console_.error('paint', result.buffer.nameBase64, image.getSize());
+      }
+      if (options['no-paint']) {
+        return;
+      }
 
-    const buffer = image.toBitmap();
-    result.buffer.write(buffer, imageSize.width);
-    containerFrame
-      .loadFrame(frameNumber, result.buffer, imageSize)
-      .composite(layoutNode.deviceLayout);
+      if (result.size != null && imageBufferSize > result.size) {
+        if (options['debug-paint']) {
+          console_.error('replace buffer', result.buffer.nameBase64, result.size, imageBufferSize);
+        }
+        result.buffer = new ShmGraphicBuffer(imageBufferSize);
+        result.size = imageBufferSize;
+      }
+
+      const buffer = image.toBitmap();
+      result.buffer.write(buffer, imageSize.width);
+      containerFrame
+        .loadFrame(frameNumber, result.buffer, imageSize)
+        .composite(layoutNode.deviceLayout);
+    } catch (error) {
+      // A paint failure must not become an unhandled rejection: it would kill
+      // the process mid-escape-stream and wedge the terminal.
+      console_.error('paint failed', error);
+    }
   }
 
   contents.on('paint', paint);
@@ -213,34 +220,40 @@ export function registerPaintedContentFallback(
   };
 
   async function paint(_: any, _dirty: Rectangle, image: NativeImage) {
-    const imageSize = image.getSize();
-    const imageBufferSize = imageSize.width * imageSize.height * 4;
+    try {
+      const imageSize = image.getSize();
+      const imageBufferSize = imageSize.width * imageSize.height * 4;
 
-    const position = {
-      x: coordsFromPx(cellToPxX, layoutNode.deviceLayout.x),
-      y: coordsFromPx(cellToPxY, layoutNode.deviceLayout.y),
-    };
+      const position = {
+        x: coordsFromPx(cellToPxX, layoutNode.deviceLayout.x),
+        y: coordsFromPx(cellToPxY, layoutNode.deviceLayout.y),
+      };
 
-    let replace = true;
-    if (result.buffer == null || (result.size != null && imageBufferSize > result.size)) {
-      replace = false;
-      const buffer = new ShmGraphicBuffer(imageBufferSize);
-      paintedImage?.free();
-      buffer.write(image.toBitmap(), imageSize.width);
-      paintedImage = paintImage(buffer, imageSize, position);
+      let replace = true;
+      if (result.buffer == null || (result.size != null && imageBufferSize > result.size)) {
+        replace = false;
+        const buffer = new ShmGraphicBuffer(imageBufferSize);
+        paintedImage?.free();
+        buffer.write(image.toBitmap(), imageSize.width);
+        paintedImage = paintImage(buffer, imageSize, position);
 
-      result.buffer = buffer;
-      result.size = imageBufferSize;
-    }
-    if (options['debug-paint']) {
-      console_.error('paint', result.buffer.nameBase64, image.getSize());
-    }
-    if (options['no-paint']) {
-      return;
-    }
+        result.buffer = buffer;
+        result.size = imageBufferSize;
+      }
+      if (options['debug-paint']) {
+        console_.error('paint', result.buffer.nameBase64, image.getSize());
+      }
+      if (options['no-paint']) {
+        return;
+      }
 
-    if (replace && paintedImage) {
-      paintedImage.replace(image.toBitmap());
+      if (replace && paintedImage) {
+        paintedImage.replace(image.toBitmap());
+      }
+    } catch (error) {
+      // Same containment as the animation handler: never let a paint error
+      // escape as an unhandled rejection.
+      console_.error('fallback paint failed', error);
     }
   }
   contents.on('paint', paint);
