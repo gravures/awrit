@@ -9,3 +9,5 @@ awrit_error.txt
 lcov.info
 .lcov*
 coverage.xml
+/.opencode/
+/.paul/
