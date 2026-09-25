@@ -10,8 +10,6 @@ use nix::sys::mman::{mmap, munmap, shm_open, shm_unlink, MapFlags, ProtFlags};
 use nix::sys::stat::Mode;
 use nix::unistd::ftruncate;
 use std::num::NonZeroUsize;
-use std::os::fd::OwnedFd;
-use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod term;
@@ -27,18 +25,10 @@ pub struct DirtyRect {
   pub height: u32,
 }
 
-/// A lazily created, persistent shm mapping: opened and mmapped once,
-/// reused for every write, and released when the buffer is dropped.
-struct ShmMapping {
-  fd: OwnedFd,
-  addr: usize,
-}
-
 #[napi(custom_finalize)]
 pub struct ShmGraphicBuffer {
   name: String,
   size: u32,
-  mapping: Mutex<Option<ShmMapping>>,
 }
 
 impl ObjectFinalize for ShmGraphicBuffer {
@@ -68,11 +58,7 @@ impl ShmGraphicBuffer {
     };
     let name = format!("/awrit_{}", significant_part);
 
-    Self {
-      name,
-      size,
-      mapping: Mutex::new(None),
-    }
+    Self { name, size }
   }
 
   /// Returns a reference to the shared memory name
@@ -105,14 +91,14 @@ impl ShmGraphicBuffer {
     Ok(())
   }
 
-  /// Lazily opens and maps the shared memory once; the mapping is reused for
-  /// every subsequent write and released when the buffer is dropped.
-  fn ensure_mapped(&self) -> napi::Result<usize> {
-    let mut mapping = self.mapping.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(m) = mapping.as_ref() {
-      return Ok(m.addr);
-    }
-
+  /// Writes an image buffer to the shared memory at the specified dirty rectangle
+  #[napi]
+  pub fn write(
+    &self,
+    buffer: Buffer,
+    image_width: u32,
+    dirty_rect: Option<DirtyRect>,
+  ) -> napi::Result<()> {
     // Open shared memory
     let fd = shm_open(
       self.name(),
@@ -134,29 +120,14 @@ impl ShmGraphicBuffer {
         size,
         ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
         MapFlags::MAP_SHARED,
-        &fd,
+        fd,
         0,
       )
-    }
-    .map_err(|e| napi::Error::from_reason(format!("Failed to mmap shared memory: {}", e)))?;
-
-    let addr = ptr.as_ptr() as usize;
-    *mapping = Some(ShmMapping { fd, addr });
-    Ok(addr)
-  }
-
-  /// Writes an image buffer to the shared memory at the specified dirty rectangle
-  #[napi]
-  pub fn write(
-    &self,
-    buffer: Buffer,
-    image_width: u32,
-    dirty_rect: Option<DirtyRect>,
-  ) -> napi::Result<()> {
-    let addr = self.ensure_mapped()?;
-
+      .map_err(|e| napi::Error::from_reason(format!("Failed to mmap shared memory: {}", e)))?
+    };
     let src_slice = buffer.as_ref();
-    let dst_slice = unsafe { std::slice::from_raw_parts_mut(addr as *mut u8, self.size as usize) };
+    let dst_slice =
+      unsafe { std::slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, self.size as usize) };
 
     match dirty_rect {
       Some(rect) => {
@@ -166,23 +137,7 @@ impl ShmGraphicBuffer {
           width: rect.width,
           height: rect.height,
         };
-        // Convert the rect in place (same position in the shared frame as in
-        // the source bitmap), so a partial update ends up byte-identical to a
-        // full-frame write of the same image.
-        let dst_start = (rect.y as usize)
-          .saturating_mul(image_width as usize)
-          .saturating_add(rect.x as usize)
-          * 4;
-        let dst_end = dst_start.saturating_add(rect.width as usize * rect.height as usize * 4);
-        if dst_end > dst_slice.len() || rect.x.saturating_add(rect.width) > image_width {
-          return Err(napi::Error::from_reason("Failed to convert BGRA to RGBA"));
-        }
-        if !bgra_to_rgba::bgra_to_rgba_rect(
-          src_slice,
-          &mut dst_slice[dst_start..dst_end],
-          image_width,
-          bgra_rect,
-        ) {
+        if !bgra_to_rgba::bgra_to_rgba_rect(src_slice, dst_slice, image_width, bgra_rect) {
           return Err(napi::Error::from_reason("Failed to convert BGRA to RGBA"));
         }
       }
@@ -193,20 +148,11 @@ impl ShmGraphicBuffer {
       }
     }
 
-    Ok(())
-  }
-}
-
-impl Drop for ShmGraphicBuffer {
-  fn drop(&mut self) {
-    if let Some(mapping) = self.mapping.get_mut().unwrap_or_else(|e| e.into_inner()).take() {
-      let ShmMapping { fd, addr } = mapping;
-      if let Some(ptr) = std::ptr::NonNull::new(addr as *mut std::ffi::c_void) {
-        unsafe {
-          let _ = munmap(ptr, self.size as usize);
-        }
-      }
-      drop(fd);
+    unsafe {
+      munmap(ptr, size.get())
+        .map_err(|e| napi::Error::from_reason(format!("Failed to munmap shared memory: {}", e)))?;
     }
+
+    Ok(())
   }
 }

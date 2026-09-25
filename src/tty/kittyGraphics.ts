@@ -1,7 +1,7 @@
 import { GFX } from './escapeCodes';
 import type { Rect, Size } from './graphics';
 import { options } from '../args';
-import type { DirtyRect, ShmGraphicBuffer } from 'awrit-native-rs';
+import type { ShmGraphicBuffer } from 'awrit-native-rs';
 import { placeCursor } from './output';
 import { isTmuxSession } from './tmux';
 const { stdout } = process;
@@ -116,7 +116,7 @@ export interface PaintedImage {
   readonly size: Size;
   buffer: ShmGraphicBuffer;
   free: () => void;
-  replace: (buffer: Buffer, dirty?: DirtyRect) => void;
+  replace: (buffer: Buffer) => void;
 }
 
 export function paintImage(
@@ -134,8 +134,8 @@ export function paintImage(
     size,
     buffer,
     free: () => freeImage(id),
-    replace: (buffer_, dirty?) => {
-      buffer.write(buffer_, size.width, dirty);
+    replace: (buffer_) => {
+      buffer.write(buffer_, size.width);
       // freeImage(id);
       placeCursor({ x: position.x.cell, y: position.y.cell });
       paintBitmap(buffer.nameBase64, size, control);
