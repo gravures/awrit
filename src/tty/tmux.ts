@@ -70,7 +70,9 @@ export function getPaneTty() {
   return runTmux(['display-message', '-t', pane, '-p', '#{pane_tty}']);
 }
 
-const PANE_SIZE_CACHE_TTL_MS = 250;
+// Belt-and-braces TTL: pane resize without our SIGWINCH is impossible, and
+// the resize handler invalidates this cache — paints should never exec tmux.
+const PANE_SIZE_CACHE_TTL_MS = 5000;
 let paneSizeCache:
   | {
       pane: string;
@@ -78,6 +80,10 @@ let paneSizeCache:
       at: number;
     }
   | undefined;
+
+export function invalidatePaneSizeCache() {
+  paneSizeCache = undefined;
+}
 
 export function getPaneSize(): TmuxPaneSize {
   const pane = getPaneId();

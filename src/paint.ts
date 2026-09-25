@@ -144,52 +144,145 @@ function startCellFromPx(px: number, cellToPx: number) {
   return Math.max(0, Math.floor(px / cellToPx));
 }
 
-function colsRowsFromPx(size: { width: number; height: number }, cellToPxX: number, cellToPxY: number) {
+// Overlay crop tracked in base-image cell indices. The bounding rect is
+// rewritten in full on every crop so no cell ever points at a deleted image.
+type CellRegion = { l: number; t: number; r: number; b: number };
+
+// Snap a dirty rect outward to whole cells of the BASE image mapping
+// (scale = imageSize / cols, NOT nominal cellToPx — the terminal stretches
+// the image over cols cells, and the two differ when the cell size is
+// fractional). Returns null for full-frame or unusable rects.
+function snapDirtyCells(
+  dirty: Rectangle,
+  colsBase: number,
+  rowsBase: number,
+  scaleX: number,
+  scaleY: number,
+): CellRegion | null {
+  const l = Math.max(0, Math.floor(dirty.x / scaleX));
+  const t = Math.max(0, Math.floor(dirty.y / scaleY));
+  const r = Math.min(colsBase, Math.ceil((dirty.x + dirty.width) / scaleX));
+  const b = Math.min(rowsBase, Math.ceil((dirty.y + dirty.height) / scaleY));
+  if (r <= l || b <= t) return null;
+  if (l === 0 && t === 0 && r >= colsBase && b >= rowsBase) return null;
+  return { l, t, r, b };
+}
+
+function unionCells(a: CellRegion, b: CellRegion): CellRegion {
   return {
-    cols: Math.max(1, Math.ceil(size.width / cellToPxX)),
-    rows: Math.max(1, Math.ceil(size.height / cellToPxY)),
+    l: Math.min(a.l, b.l),
+    t: Math.min(a.t, b.t),
+    r: Math.max(a.r, b.r),
+    b: Math.max(a.b, b.b),
   };
 }
 
 export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutNode): PaintedContent {
   const contents = w.webContents;
-  const slotId = allocateTmuxImageId();
+  // Two slots: base carries full frames (replacing it repaints everything);
+  // overlay carries the bounding box of all crops since the last full frame,
+  // so every overlay cell is rewritten each crop — the renderer replaces
+  // per-slot, and a single slot would blank the pane (it deletes the old image).
+  const slotBase = allocateTmuxImageId();
+  const slotOverlay = allocateTmuxImageId();
+  let lastFrameSize: { width: number; height: number } | undefined;
+  let overlayCells: CellRegion | undefined;
 
   const result: PaintedContent = {
     destroy() {
       contents.off('paint', paint);
-      tmuxRenderer?.releaseSlot(slotId);
+      tmuxRenderer?.releaseSlot(slotBase);
+      tmuxRenderer?.releaseSlot(slotOverlay);
       this.buffer = undefined;
     },
   };
 
-  async function paint(_: any, _dirty: Rectangle, image: NativeImage) {
+  async function paint(_: any, dirty: Rectangle, image: NativeImage) {
     if (!tmuxRenderer) return;
     if (options['no-paint']) return;
 
     try {
       const imageSize = image.getSize();
-      const imageBufferSize = imageSize.width * imageSize.height * 4;
-
-      if (result.buffer == null || (result.size != null && imageBufferSize > result.size)) {
-        // Use existing lifecycle to keep memory use consistent with other renderers.
-        result.buffer = new ShmGraphicBuffer(imageBufferSize);
-        result.size = imageBufferSize;
-      }
-
       const termSize = getWindowSize();
       const cellToPx = safeCellToPx(termSize);
-      const { cols, rows } = colsRowsFromPx(imageSize, cellToPx.x, cellToPx.y);
-      const startCol = startCellFromPx(layoutNode.deviceLayout.x, cellToPx.x);
-      const startRow = startCellFromPx(layoutNode.deviceLayout.y, cellToPx.y);
+      const baseStartCol = startCellFromPx(layoutNode.deviceLayout.x, cellToPx.x);
+      const baseStartRow = startCellFromPx(layoutNode.deviceLayout.y, cellToPx.y);
       const pane = getPaneSize();
 
+      // Base mapping: same math the full-frame path has always used.
+      const colsBase = Math.max(1, Math.ceil(imageSize.width / cellToPx.x));
+      const rowsBase = Math.max(1, Math.ceil(imageSize.height / cellToPx.y));
+      const scaleX = imageSize.width / colsBase;
+      const scaleY = imageSize.height / rowsBase;
+
+      const sizeChanged =
+        lastFrameSize == null ||
+        lastFrameSize.width !== imageSize.width ||
+        lastFrameSize.height !== imageSize.height;
+
+      let cells: CellRegion | null = sizeChanged
+        ? null
+        : snapDirtyCells(dirty, colsBase, rowsBase, scaleX, scaleY);
+      if (cells && overlayCells) {
+        cells = unionCells(overlayCells, cells);
+        if (cells.l === 0 && cells.t === 0 && cells.r >= colsBase && cells.b >= rowsBase) {
+          cells = null; // bounding box covers everything — plain full frame
+        }
+      }
+
+      let startCol = baseStartCol;
+      let startRow = baseStartRow;
+      let cols = colsBase;
+      let rows = rowsBase;
+      let source = image;
+      if (cells) {
+        overlayCells = cells;
+        const x = Math.round(cells.l * scaleX);
+        const y = Math.round(cells.t * scaleY);
+        source = image.crop({
+          x,
+          y,
+          width: Math.round(cells.r * scaleX) - x,
+          height: Math.round(cells.b * scaleY) - y,
+        });
+        cols = cells.r - cells.l;
+        rows = cells.b - cells.t;
+        startCol = baseStartCol + cells.l;
+        startRow = baseStartRow + cells.t;
+      } else {
+        overlayCells = undefined;
+      }
+
+      const slotId = cells ? slotOverlay : slotBase;
       if (options['debug-paint']) {
-        console_.error('tmux paint', { slotId, cols, rows, startCol, startRow, pane });
+        console_.error('tmux paint', {
+          slotId,
+          cols,
+          rows,
+          startCol,
+          startRow,
+          pane,
+          cropped: cells != null,
+        });
+      }
+
+      if (!cells) {
+        // Full frame supersedes any crop overlay; drop it first so no batch
+        // re-flushes a stale crop after the base has covered its cells.
+        tmuxRenderer.releaseSlot(slotOverlay);
       }
 
       const imageId = allocateTmuxImageId();
-      await tmuxRenderer.renderPng(image.toPNG(), imageId, cols, rows, startCol, startRow, pane, slotId);
+      await tmuxRenderer.renderPng(
+        source.toPNG(),
+        imageId,
+        cols,
+        rows,
+        startCol,
+        startRow,
+        pane,
+        slotId,
+      );
     } catch (error) {
       console_.error('tmux renderer paint failed; retained frame queued for retry', error);
     }

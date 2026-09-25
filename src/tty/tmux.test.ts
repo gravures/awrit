@@ -3,7 +3,13 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fakeTimers } from '../fake-timers.test';
-import { getAllowPassthrough, getPaneSize, getPaneState, getPaneStatus } from './tmux';
+import {
+  getAllowPassthrough,
+  getPaneSize,
+  getPaneState,
+  getPaneStatus,
+  invalidatePaneSizeCache,
+} from './tmux';
 
 const clock = fakeTimers();
 
@@ -170,7 +176,18 @@ echo ""
     process.env.TMUX_PANE = `%${Date.now()}2`;
 
     expect(getPaneSize()).toEqual({ cols: 120, rows: 40 });
-    await clock.tickAsync(251);
+    await clock.tickAsync(5001);
+    expect(getPaneSize()).toEqual({ cols: 120, rows: 40 });
+
+    const log = readFileSync(logPath, 'utf8');
+    expect(countLinesContaining(log, '#{pane_width} #{pane_height}')).toBe(2);
+  });
+
+  test('invalidatePaneSizeCache forces a refresh before TTL expiry', async () => {
+    process.env.TMUX_PANE = `%${Date.now()}6`;
+
+    expect(getPaneSize()).toEqual({ cols: 120, rows: 40 });
+    invalidatePaneSizeCache();
     expect(getPaneSize()).toEqual({ cols: 120, rows: 40 });
 
     const log = readFileSync(logPath, 'utf8');

@@ -5,7 +5,7 @@ import {
   normalizeTmuxMouseCoordinates,
   type MouseCoordinateMode,
 } from './tty/mouseCoordinates';
-import { isTmuxSession } from './tty/tmux';
+import { invalidatePaneSizeCache, isTmuxSession } from './tty/tmux';
 import { focusedView, setTerminalIsFocused, updateFrameRates } from './windows';
 
 const WHEEL_DELTA = 100;
@@ -195,8 +195,9 @@ export function handleInput(evt: TermEvent) {
     }
 
     case 'resize':
-      // Only invalidate the term-size cache; SIGWINCH layout lives in windows.ts
+      // Only invalidate term-size + tmux pane-size caches; SIGWINCH layout lives in windows.ts
       cachedTermSize = undefined;
+      invalidatePaneSizeCache();
       break;
     case 'paste':
       // paste: bracketed-paste handling lands in plan 05-02
