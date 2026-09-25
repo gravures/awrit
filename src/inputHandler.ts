@@ -6,7 +6,7 @@ import {
   type MouseCoordinateMode,
 } from './tty/mouseCoordinates';
 import { isTmuxSession } from './tty/tmux';
-import { focusedView } from './windows';
+import { focusedView, setTerminalIsFocused, updateFrameRates } from './windows';
 
 const WHEEL_DELTA = 100;
 
@@ -73,6 +73,14 @@ function maybeNormalizeTmuxMouseCoordinates(rawX: number, rawY: number) {
 }
 
 export function handleInput(evt: TermEvent) {
+  // Focus needs no view; handle before the no-view early return.
+  if (evt.eventType === 'focus') {
+    // Rust sends focusGained: true on gain, focusGained: undefined on loss.
+    setTerminalIsFocused(evt.focusGained === true);
+    updateFrameRates();
+    return;
+  }
+
   const view = focusedView.current;
   if (!view) {
     handleKeyBinding(evt);
