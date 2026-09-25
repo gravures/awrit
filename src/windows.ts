@@ -97,6 +97,21 @@ function padSize(size: Size): Size {
 }
 
 export const managedViews: WindowView[] = [];
+
+// Terminal focus (mode 1004) drives frame rates: unfocused = 1fps floor.
+let terminalIsFocused = true;
+
+export function setTerminalIsFocused(focused: boolean) {
+  terminalIsFocused = focused;
+}
+
+export function updateFrameRates() {
+  for (const view of managedViews) {
+    const active = terminalIsFocused && view === focusedView.current;
+    view.content.webContents.setFrameRate(active ? 60 : 1);
+    view.toolbar.webContents.setFrameRate(active ? 30 : 1); // Toolbar is mostly static
+  }
+}
 /**
  * Creates a new window with a toolbar and main content area
  * @param size Window size
@@ -351,11 +366,6 @@ export async function createWindowWithToolbar(
 
   content.webContents.invalidate();
 
-  // Limit offscreen rendering frame rate to reduce CPU usage.
-  // Terminals can't display faster than ~60fps anyway.
-  content.webContents.setFrameRate(60);
-  toolbar.webContents.setFrameRate(30); // Toolbar is mostly static
-
   toolbar.webContents.on('cursor-changed', updateCursor);
   content.webContents.on('cursor-changed', updateCursor);
 
@@ -380,6 +390,8 @@ export async function createWindowWithToolbar(
   // Add to managed windows
   managedViews.push(view);
   focusedView.current = view;
+  // Terminals can't display faster than ~60fps anyway; caps apply here.
+  updateFrameRates();
 
   // Set up IPC for toolbar interactions
   setupToolbarIPC(toolbar.webContents, content.webContents);

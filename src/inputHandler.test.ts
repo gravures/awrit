@@ -6,7 +6,11 @@ import {
 } from './tty/mouseCoordinates';
 
 // inputHandler imports windows.ts (electron); stub it so the pure wheel helper is testable
-mock.module('./windows', () => ({ focusedView: { current: null } }));
+mock.module('./windows', () => ({
+  focusedView: { current: null },
+  setTerminalIsFocused: () => {},
+  updateFrameRates: () => {},
+}));
 const { buildWheelEvent } = await import('./inputHandler');
 
 describe('buildWheelEvent', () => {

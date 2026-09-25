@@ -74,7 +74,6 @@ export const setup = () => {
       Mode.cursorKeyToApp,
       Mode.reverseVideo,
       Mode.bracketedPaste,
-      Mode.focusTracking,
       Mode.mouseButtonTracking,
       Mode.mouseMotionTracking,
       Mode.mouseMoveTracking,
@@ -91,6 +90,7 @@ export const setup = () => {
       Mode.alternateScreen,
       Mode.mouseSgrPixelMode,
       Mode.mouseMoveTracking,
+      Mode.focusTracking,
     ],
     true,
   );
@@ -100,7 +100,10 @@ export const setup = () => {
 
 export const cleanup = () => {
   clearScreen();
-  setModes([Mode.alternateScreen, Mode.mouseMoveTracking, Mode.mouseSgrPixelMode], false);
+  setModes(
+    [Mode.alternateScreen, Mode.mouseMoveTracking, Mode.mouseSgrPixelMode, Mode.focusTracking],
+    false,
+  );
   setModes([Mode.textCursor], true);
   stdout.write(RESTORE_PRIVATE_MODE_VALUES + RESTORE_CURSOR + RESTORE_COLORS);
 };
