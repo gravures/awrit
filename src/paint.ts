@@ -5,6 +5,7 @@ import { options } from './args';
 import { console_ } from './console';
 import { features } from './features';
 import type { LayoutNode } from './layout';
+import { perfCount, perfEnd, perfPending, perfTime } from './perf';
 import { createImageIdAllocator } from './tty/imageIds';
 import {
   type AnimationFrame,
@@ -84,6 +85,8 @@ export function registerPaintedContent(
   };
 
   async function paint(_: any, _dirty: Rectangle, image: NativeImage) {
+    perfPending('paint', 1);
+    const tArrive = perfTime();
     try {
       const imageSize = image.getSize();
 
@@ -109,13 +112,19 @@ export function registerPaintedContent(
 
       const buffer = image.toBitmap();
       result.buffer.write(buffer, imageSize.width);
+      perfEnd('paint.arrive→encode', tArrive);
+      const tSubmit = perfTime();
       containerFrame
         .loadFrame(frameNumber, result.buffer, imageSize)
         .composite(layoutNode.deviceLayout);
+      perfEnd('paint.encode→submit', tSubmit);
+      perfCount('paint.completed');
     } catch (error) {
       // A paint failure must not become an unhandled rejection: it would kill
       // the process mid-escape-stream and wedge the terminal.
       console_.error('paint failed', error);
+    } finally {
+      perfPending('paint', -1);
     }
   }
 
@@ -201,6 +210,8 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
     if (!tmuxRenderer) return;
     if (options['no-paint']) return;
 
+    perfPending('submit', 1);
+    const tArrive = perfTime();
     try {
       const imageSize = image.getSize();
       const termSize = getWindowSize();
@@ -273,8 +284,11 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
       }
 
       const imageId = allocateTmuxImageId();
+      const png = source.toPNG();
+      perfEnd('submit.arrive→encode', tArrive);
+      const tSubmit = perfTime();
       await tmuxRenderer.renderPng(
-        source.toPNG(),
+        png,
         imageId,
         cols,
         rows,
@@ -283,8 +297,12 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
         pane,
         slotId,
       );
+      perfEnd('submit.encode→submit', tSubmit);
+      perfCount('submit.completed');
     } catch (error) {
       console_.error('tmux renderer paint failed; retained frame queued for retry', error);
+    } finally {
+      perfPending('submit', -1);
     }
   }
 
@@ -313,6 +331,8 @@ export function registerPaintedContentFallback(
   };
 
   async function paint(_: any, _dirty: Rectangle, image: NativeImage) {
+    perfPending('paint', 1);
+    const tArrive = perfTime();
     try {
       const imageSize = image.getSize();
       const imageBufferSize = imageSize.width * imageSize.height * 4;
@@ -343,10 +363,14 @@ export function registerPaintedContentFallback(
       if (replace && paintedImage) {
         paintedImage.replace(image.toBitmap());
       }
+      perfEnd('paint.arrive→encode', tArrive);
+      perfCount('paint.completed');
     } catch (error) {
       // Same containment as the animation handler: never let a paint error
       // escape as an unhandled rejection.
       console_.error('fallback paint failed', error);
+    } finally {
+      perfPending('paint', -1);
     }
   }
   contents.on('paint', paint);
