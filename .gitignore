@@ -6,3 +6,5 @@ out
 .bun
 awrit_error.txt
 /awrit-native-rs/package-lock.json
+/.opencode/
+/.paul/
