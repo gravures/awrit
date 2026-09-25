@@ -1,4 +1,4 @@
-import { type DirtyRect, getWindowSize, ShmGraphicBuffer } from 'awrit-native-rs';
+import { getWindowSize, ShmGraphicBuffer } from 'awrit-native-rs';
 import type { BrowserWindow, NativeImage, Rectangle } from 'electron';
 import { abort } from './abort';
 import { options } from './args';
@@ -27,22 +27,6 @@ type PaintedContent = {
 };
 
 const weakPaintedContents_ = new WeakMap<BrowserWindow, PaintedContent>();
-
-/** Clamp the Electron dirty rect to image bounds; undefined = full-frame write. */
-function clampedDirtyRect(
-  imageSize: { width: number; height: number },
-  dirty: Rectangle,
-): DirtyRect | undefined {
-  const x = Math.max(0, Math.floor(dirty.x));
-  const y = Math.max(0, Math.floor(dirty.y));
-  const right = Math.min(imageSize.width, Math.ceil(dirty.x + dirty.width));
-  const bottom = Math.min(imageSize.height, Math.ceil(dirty.y + dirty.height));
-  if (right <= x || bottom <= y) return undefined;
-  if (x === 0 && y === 0 && right === imageSize.width && bottom === imageSize.height) {
-    return undefined;
-  }
-  return { x, y, width: right - x, height: bottom - y };
-}
 type TmuxPaintRenderer = {
   close(): void;
   releaseSlot(slotId: number): void;
@@ -99,11 +83,10 @@ export function registerPaintedContent(
     },
   };
 
-  async function paint(_: any, dirty: Rectangle, image: NativeImage) {
+  async function paint(_: any, _dirty: Rectangle, image: NativeImage) {
     const imageSize = image.getSize();
 
     const imageBufferSize = imageSize.width * imageSize.height * 4;
-    let fullFrame = result.buffer == null;
     if (result.buffer == null) {
       result.buffer = new ShmGraphicBuffer(imageBufferSize);
     }
@@ -120,15 +103,10 @@ export function registerPaintedContent(
       }
       result.buffer = new ShmGraphicBuffer(imageBufferSize);
       result.size = imageBufferSize;
-      fullFrame = true;
     }
 
     const buffer = image.toBitmap();
-    result.buffer.write(
-      buffer,
-      imageSize.width,
-      fullFrame ? undefined : clampedDirtyRect(imageSize, dirty),
-    );
+    result.buffer.write(buffer, imageSize.width);
     containerFrame
       .loadFrame(frameNumber, result.buffer, imageSize)
       .composite(layoutNode.deviceLayout);
@@ -234,7 +212,7 @@ export function registerPaintedContentFallback(
     },
   };
 
-  async function paint(_: any, dirty: Rectangle, image: NativeImage) {
+  async function paint(_: any, _dirty: Rectangle, image: NativeImage) {
     const imageSize = image.getSize();
     const imageBufferSize = imageSize.width * imageSize.height * 4;
 
@@ -262,7 +240,7 @@ export function registerPaintedContentFallback(
     }
 
     if (replace && paintedImage) {
-      paintedImage.replace(image.toBitmap(), clampedDirtyRect(imageSize, dirty));
+      paintedImage.replace(image.toBitmap());
     }
   }
   contents.on('paint', paint);
