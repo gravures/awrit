@@ -30,6 +30,27 @@ function isSimpleMouseEvent(kind: unknown): kind is (typeof mouseEventTypes)[num
   return mouseEventTypes.includes(kind as (typeof mouseEventTypes)[number]);
 }
 
+type MouseMoveSnapshot = {
+  view: unknown;
+  x: number;
+  y: number;
+  modifiers: readonly string[];
+};
+
+let lastMouseMove: MouseMoveSnapshot | undefined;
+
+/** Skip duplicate mouseMove events: same target view, same coords, same modifiers. */
+export function shouldSendMouseMove(prev: MouseMoveSnapshot | undefined, next: MouseMoveSnapshot) {
+  if (!prev) return true;
+  return (
+    prev.view !== next.view ||
+    prev.x !== next.x ||
+    prev.y !== next.y ||
+    prev.modifiers.length !== next.modifiers.length ||
+    prev.modifiers.some((m, i) => m !== next.modifiers[i])
+  );
+}
+
 type ScrollKind = 'scrollUp' | 'scrollDown' | 'scrollLeft' | 'scrollRight';
 
 export function buildWheelEvent(
@@ -169,6 +190,17 @@ export function handleInput(evt: TermEvent) {
 
       const electronButton =
         button === 'fourth' || button === 'fifth' || button == null ? undefined : button;
+
+      if (kind === 'mouseMove') {
+        const next: MouseMoveSnapshot = {
+          view: focusedContent,
+          x: adjustedX,
+          y: adjustedY,
+          modifiers: modifiers ?? [],
+        };
+        if (!shouldSendMouseMove(lastMouseMove, next)) break;
+        lastMouseMove = next;
+      }
 
       focusedContent.sendInputEvent({
         type: kind,

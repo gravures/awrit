@@ -11,7 +11,7 @@ mock.module('./windows', () => ({
   setTerminalIsFocused: () => {},
   updateFrameRates: () => {},
 }));
-const { buildWheelEvent } = await import('./inputHandler');
+const { buildWheelEvent, shouldSendMouseMove } = await import('./inputHandler');
 
 describe('buildWheelEvent', () => {
   test('scrollUp/scrollDown produce Y-only wheel deltas', () => {
@@ -84,5 +84,33 @@ describe('inputHandler tmux mouse normalization', () => {
     const termSize = { cols: 100, rows: 40, width: 1000, height: 800 };
     const mode = nextTmuxMouseCoordinateMode(10, 10, termSize, 'unknown', 'pixel');
     expect(mode).toBe('pixel');
+  });
+});
+
+describe('shouldSendMouseMove', () => {
+  const base = { view: { name: 'content' }, x: 10, y: 20, modifiers: [] };
+
+  test('first move (no previous state) is always sent', () => {
+    expect(shouldSendMouseMove(undefined, base)).toBe(true);
+  });
+
+  test('identical move is skipped', () => {
+    expect(shouldSendMouseMove({ ...base }, { ...base })).toBe(false);
+  });
+
+  test('different coordinates are sent', () => {
+    expect(shouldSendMouseMove(base, { ...base, x: 11 })).toBe(true);
+    expect(shouldSendMouseMove(base, { ...base, y: 21 })).toBe(true);
+  });
+
+  test('different target view is sent', () => {
+    expect(shouldSendMouseMove(base, { ...base, view: { name: 'toolbar' } })).toBe(true);
+  });
+
+  test('different modifiers are sent', () => {
+    expect(shouldSendMouseMove(base, { ...base, modifiers: ['shift'] })).toBe(true);
+    expect(
+      shouldSendMouseMove({ ...base, modifiers: ['shift'] }, { ...base, modifiers: [] }),
+    ).toBe(true);
   });
 });

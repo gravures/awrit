@@ -49,8 +49,7 @@ const CONFIG_PATH = '../config.js';
 const CONFIG_PATH_RESOLVED = path.resolve(__dirname, CONFIG_PATH);
 loadConfig(require(CONFIG_PATH_RESOLVED));
 
-fs.watchFile(CONFIG_PATH_RESOLVED, { interval: 200 }, (curr, prev) => {
-  if (curr.mtime <= prev.mtime) return;
+function reloadConfig() {
   const oldConfig = require(CONFIG_PATH_RESOLVED);
   require.cache[CONFIG_PATH_RESOLVED] = undefined;
 
@@ -66,7 +65,32 @@ fs.watchFile(CONFIG_PATH_RESOLVED, { interval: 200 }, (curr, prev) => {
       console_.error('Error restoring old config:', e);
     }
   }
-});
+}
+
+let configReloadTimer: ReturnType<typeof setTimeout> | undefined;
+function scheduleConfigReload() {
+  if (configReloadTimer) clearTimeout(configReloadTimer);
+  configReloadTimer = setTimeout(() => {
+    configReloadTimer = undefined;
+    reloadConfig();
+  }, 300);
+}
+
+// fs.watch is event-driven; watchFile polls every 1000ms by comparison.
+try {
+  // Watch the directory, not the file: editors that save via rename-replace
+  // leave a file-level inotify watch pointing at the deleted inode.
+  const configName = path.basename(CONFIG_PATH_RESOLVED);
+  fs.watch(path.dirname(CONFIG_PATH_RESOLVED), (_event, filename) => {
+    if (filename === configName) scheduleConfigReload();
+  });
+} catch (e) {
+  console_.error('fs.watch unavailable, falling back to fs.watchFile:', e);
+  fs.watchFile(CONFIG_PATH_RESOLVED, { interval: 1000 }, (curr, prev) => {
+    if (curr.mtime <= prev.mtime) return;
+    reloadConfig();
+  });
+}
 
 // Don't show a dialog box on uncaught errors
 dialog.showErrorBox = (title, content) => {
