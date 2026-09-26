@@ -284,7 +284,9 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
       }
 
       const imageId = allocateTmuxImageId();
+      const tPng = perfTime();
       const png = source.toPNG();
+      perfEnd('submit.toPNG', tPng);
       perfEnd('submit.arrive→encode', tArrive);
       const tSubmit = perfTime();
       await tmuxRenderer.renderPng(
@@ -342,13 +344,19 @@ export function registerPaintedContentFallback(
         y: coordsFromPx(cellToPxY, layoutNode.deviceLayout.y),
       };
 
+      const tBitmap = perfTime();
+      const bmp = image.toBitmap();
+      perfEnd('paint.toBitmap', tBitmap);
+
       let replace = true;
       if (result.buffer == null || (result.size != null && imageBufferSize > result.size)) {
         replace = false;
+        const tAlloc = perfTime();
         const buffer = new ShmGraphicBuffer(imageBufferSize);
         paintedImage?.free();
-        buffer.write(image.toBitmap(), imageSize.width);
+        buffer.write(bmp, imageSize.width);
         paintedImage = paintImage(buffer, imageSize, position);
+        perfEnd('paint.alloc', tAlloc);
 
         result.buffer = buffer;
         result.size = imageBufferSize;
@@ -361,7 +369,9 @@ export function registerPaintedContentFallback(
       }
 
       if (replace && paintedImage) {
-        paintedImage.replace(image.toBitmap());
+        const tReplace = perfTime();
+        paintedImage.replace(bmp);
+        perfEnd('paint.replace', tReplace);
       }
       perfEnd('paint.arrive→encode', tArrive);
       perfCount('paint.completed');
