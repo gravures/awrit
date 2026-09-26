@@ -11,6 +11,7 @@ const counters = new Map<string, number>();
 const timers = new Map<string, { count: number; sum: number; max: number }>();
 const gauges = new Map<string, number>(); // live values (persist across buckets)
 const gaugeMax = new Map<string, number>(); // per-bucket peaks
+const values = new Map<string, string | number>(); // plain values (cleared per bucket)
 let interval: ReturnType<typeof setInterval> | undefined;
 
 const LOG_PATH = path.join(os.homedir(), '.local/share/awrit/perf.log');
@@ -56,18 +57,29 @@ export function perfPending(name: string, delta: number) {
   ensureTimer();
 }
 
+/** Record a plain value (e.g. `frame`, `3840x2160`) reported as `name=v` in the bucket line. */
+export function perfValue(name: string, v: string | number) {
+  if (!enabled) return;
+  values.set(name, v);
+  ensureTimer();
+}
+
 /** Fold current bucket into one line and clear it. Pure — unit-tested. */
 export function flushBucket(): string | undefined {
-  if (counters.size === 0 && timers.size === 0 && gaugeMax.size === 0) return undefined;
+  if (counters.size === 0 && timers.size === 0 && gaugeMax.size === 0 && values.size === 0) {
+    return undefined;
+  }
   const parts: string[] = [];
   for (const [name, n] of counters) parts.push(`${name}=${n}`);
   for (const [name, t] of timers) {
     parts.push(`${name}=${(t.sum / t.count).toFixed(1)}/${t.max.toFixed(1)}ms(n=${t.count})`);
   }
   for (const [name, peak] of gaugeMax) parts.push(`${name}.max=${peak}`);
+  for (const [name, v] of values) parts.push(`${name}=${v}`);
   counters.clear();
   timers.clear();
   gaugeMax.clear();
+  values.clear();
   return parts.join(' ');
 }
 

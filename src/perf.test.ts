@@ -6,6 +6,7 @@ import {
   perfEnd,
   perfPending,
   perfTime,
+  perfValue,
 } from './perf';
 
 describe('perf', () => {
@@ -18,6 +19,7 @@ describe('perf', () => {
     __setPerfEnabledForTest(false);
     perfCount('in.key');
     perfPending('paint', 1);
+    perfValue('frame', '3840x2160');
     const t0 = perfTime();
     expect(t0).toBeUndefined();
     perfEnd('paint.arrive→encode', t0);
@@ -38,14 +40,19 @@ describe('perf', () => {
     perfPending('paint', 2); // live = 3, peak = 3
     perfPending('paint', -1); // live = 2, peak stays 3
 
+    perfValue('frame', '3840x2160');
+    perfValue('scale', 2);
+
     const line = flushBucket();
     expect(line).toBeDefined();
     expect(line).toContain('in.scrollUp=2');
     expect(line).toContain('in.key=1');
     expect(line).toMatch(/paint\.arrive→encode=\d+\.\d+\/\d+\.\d+ms\(n=2\)/);
     expect(line).toContain('paint.max=3');
+    expect(line).toContain('frame=3840x2160');
+    expect(line).toContain('scale=2');
 
-    // bucket was folded — a second flush reports nothing
+    // bucket was folded — a second flush reports nothing (values cleared too)
     expect(flushBucket()).toBeUndefined();
   });
 
