@@ -1,11 +1,13 @@
 import { getWindowSize, ShmGraphicBuffer } from 'awrit-native-rs';
 import type { BrowserWindow, NativeImage, Rectangle } from 'electron';
+import { screen } from 'electron';
 import { abort } from './abort';
 import { options } from './args';
 import { console_ } from './console';
+import { getDisplayScale } from './dpi';
 import { features } from './features';
 import type { LayoutNode } from './layout';
-import { perfCount, perfEnd, perfPending, perfTime } from './perf';
+import { perfCount, perfEnd, perfPending, perfTime, perfValue } from './perf';
 import { createImageIdAllocator } from './tty/imageIds';
 import {
   type AnimationFrame,
@@ -215,6 +217,14 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
     try {
       const imageSize = image.getSize();
       const termSize = getWindowSize();
+      // Frame↔pane pixel relationship (06-04 AC-1): frame is what we raster,
+      // pane is what the terminal can display. R = frame.width / termSize.width
+      // decides the readability fix; nothing here depends on it yet.
+      const [dipW, dipH] = w.getContentSize();
+      perfValue('frame', `${imageSize.width}x${imageSize.height}`);
+      perfValue('pane', `${termSize.width}x${termSize.height}`);
+      perfValue('dip', `${dipW}x${dipH}`);
+      perfValue('scale', getDisplayScale() ?? screen.getPrimaryDisplay().scaleFactor);
       const cellToPx = safeCellToPx(termSize);
       const baseStartCol = startCellFromPx(layoutNode.deviceLayout.x, cellToPx.x);
       const baseStartRow = startCellFromPx(layoutNode.deviceLayout.y, cellToPx.y);
