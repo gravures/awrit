@@ -1,4 +1,4 @@
-import { getWindowSize, ShmGraphicBuffer } from 'awrit-native-rs';
+import { encodePngOpaque, getWindowSize, ShmGraphicBuffer } from 'awrit-native-rs';
 import type { BrowserWindow, NativeImage, Rectangle } from 'electron';
 import { screen } from 'electron';
 import { abort } from './abort';
@@ -17,7 +17,24 @@ import {
   paintImage,
 } from './tty/kittyGraphics';
 import { getPaneSize, isTmuxSession } from './tty/tmux';
+import { FrameCoalescer } from './tty/frameCoalescer';
 import { TmuxRenderer } from './tty/tmuxRenderer';
+
+/** Everything needed to encode and place one frame, captured at paint time. */
+type PaintJob = {
+  image: NativeImage;
+  dirty: Rectangle;
+  imageSize: { width: number; height: number };
+  colsBase: number;
+  rowsBase: number;
+  scaleX: number;
+  scaleY: number;
+  baseStartCol: number;
+  baseStartRow: number;
+  pane: { cols: number; rows: number };
+  tArrive: number | undefined;
+  cells: CellRegion | null;
+};
 
 type PaintedContent = {
   frame?: AnimationFrame;
@@ -199,6 +216,37 @@ function unionCells(a: CellRegion, b: CellRegion): CellRegion {
   };
 }
 
+/**
+ * Encode a frame for tmux, preferring the native encoder.
+ *
+ * The write to tmux is 85-90% of delivery and is bytes-bound, so the win is in
+ * bytes, not encode time: on captured page content `png` produces 12.6-22.7%
+ * fewer bytes than Electron, bit-exact (06-05).
+ *
+ * Two fallbacks to Electron, both deliberate:
+ * - `null` means the frame has transparency. Electron's `toBitmap()` is
+ *   premultiplied, so encoding it as straight alpha would shift colours. The
+ *   native encoder refuses rather than guess.
+ * - A throw means the native path is broken. Paint handlers must never reject
+ *   (06-02 lesson), so Electron's own `toPNG()` still produces a frame.
+ */
+function encodeTmuxPng(source: NativeImage): Buffer {
+  try {
+    const { width, height } = source.getSize();
+    const native = encodePngOpaque(source.toBitmap(), width, height);
+    if (native) {
+      perfCount('submit.png.native');
+      return native;
+    }
+    perfCount('submit.png.transparent');
+  } catch (error) {
+    console_.error('native png encode failed; using electron toPNG', error);
+    perfCount('submit.png.failed');
+  }
+  perfCount('submit.png.electron');
+  return source.toPNG();
+}
+
 export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutNode): PaintedContent {
   const contents = w.webContents;
   // Two slots: base carries full frames (replacing it repaints everything);
@@ -209,6 +257,11 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
   const slotOverlay = allocateTmuxImageId();
   let lastFrameSize: { width: number; height: number } | undefined;
   let overlayCells: CellRegion | undefined;
+  // Cells asked for but not yet delivered. A frame is dropped only when a newer
+  // one replaces it, so a dropped frame's region is folded into the survivor
+  // rather than lost -- otherwise the pane keeps stale cells until a full frame.
+  let queued: CellRegion | undefined;
+  const coalescer = new FrameCoalescer<PaintJob>((job) => deliver(job));
 
   const result: PaintedContent = {
     destroy() {
@@ -223,7 +276,6 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
     if (!tmuxRenderer) return;
     if (options['no-paint']) return;
 
-    perfPending('submit', 1);
     const tArrive = perfTime();
     try {
       const imageSize = image.getSize();
@@ -244,9 +296,57 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
         lastFrameSize.width !== imageSize.width ||
         lastFrameSize.height !== imageSize.height;
 
-      let cells: CellRegion | null = sizeChanged
+      // Cells this event *asks* for. Unioning with what is still undelivered
+      // happens at drain time, because a frame dropped in between must not take
+      // its region with it.
+      const cells: CellRegion | null = sizeChanged
         ? null
         : snapDirtyCells(dirty, colsBase, rowsBase, scaleX, scaleY);
+
+      // A full frame supersedes any queued crop, so null absorbs what is pending.
+      if (cells == null) {
+        queued = undefined;
+      } else if (queued) {
+        queued = unionCells(queued, cells);
+      } else {
+        queued = cells;
+      }
+
+      const job: PaintJob = {
+        image,
+        dirty,
+        imageSize,
+        colsBase,
+        rowsBase,
+        scaleX,
+        scaleY,
+        baseStartCol,
+        baseStartRow,
+        pane,
+        tArrive,
+        cells: queued ?? null,
+      };
+      if (coalescer.offer(job) > 0) perfCount('submit.superseded');
+      perfCount('submit.events');
+    } catch (error) {
+      console_.error('tmux renderer paint failed; retained frame queued for retry', error);
+    }
+  }
+
+  /**
+   * Encode and deliver one frame. Every expensive step lives here, *after* the
+   * coalesce decision, so a frame that gets superseded is never encoded.
+   */
+  async function deliver(job: PaintJob): Promise<void> {
+    const renderer = tmuxRenderer;
+    if (!renderer) return;
+    // This job owns whatever was queued when it was offered; those cells are
+    // being delivered now, so hand the accumulator back for the ones that
+    // arrive during the drain.
+    queued = undefined;
+    try {
+      const { colsBase, rowsBase, scaleX, scaleY } = job;
+      let cells = job.cells;
       if (cells && overlayCells) {
         cells = unionCells(overlayCells, cells);
         if (cells.l === 0 && cells.t === 0 && cells.r >= colsBase && cells.b >= rowsBase) {
@@ -254,16 +354,16 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
         }
       }
 
-      let startCol = baseStartCol;
-      let startRow = baseStartRow;
+      let startCol = job.baseStartCol;
+      let startRow = job.baseStartRow;
       let cols = colsBase;
       let rows = rowsBase;
-      let source = image;
+      let source = job.image;
       if (cells) {
         overlayCells = cells;
         const x = Math.round(cells.l * scaleX);
         const y = Math.round(cells.t * scaleY);
-        source = image.crop({
+        source = job.image.crop({
           x,
           y,
           width: Math.round(cells.r * scaleX) - x,
@@ -271,8 +371,8 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
         });
         cols = cells.r - cells.l;
         rows = cells.b - cells.t;
-        startCol = baseStartCol + cells.l;
-        startRow = baseStartRow + cells.t;
+        startCol = job.baseStartCol + cells.l;
+        startRow = job.baseStartRow + cells.t;
       } else {
         overlayCells = undefined;
       }
@@ -285,7 +385,7 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
           rows,
           startCol,
           startRow,
-          pane,
+          pane: job.pane,
           cropped: cells != null,
         });
       }
@@ -293,31 +393,29 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
       if (!cells) {
         // Full frame supersedes any crop overlay; drop it first so no batch
         // re-flushes a stale crop after the base has covered its cells.
-        tmuxRenderer.releaseSlot(slotOverlay);
+        renderer.releaseSlot(slotOverlay);
       }
 
       const imageId = allocateTmuxImageId();
       const tPng = perfTime();
-      const png = source.toPNG();
+      const png = encodeTmuxPng(source);
       perfEnd('submit.toPNG', tPng);
-      perfEnd('submit.arrive→encode', tArrive);
+      perfEnd('submit.arrive→encode', job.tArrive);
       const tSubmit = perfTime();
-      await tmuxRenderer.renderPng(
+      await renderer.renderPng(
         png,
         imageId,
         cols,
         rows,
         startCol,
         startRow,
-        pane,
+        job.pane,
         slotId,
       );
       perfEnd('submit.encode→submit', tSubmit);
       perfCount('submit.completed');
     } catch (error) {
       console_.error('tmux renderer paint failed; retained frame queued for retry', error);
-    } finally {
-      perfPending('submit', -1);
     }
   }
 
