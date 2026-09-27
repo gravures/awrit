@@ -18,6 +18,7 @@ import { getForcedTmuxMouseCoordinateMode } from './tty/mouseCoordinates';
 import fs from 'node:fs';
 import path from 'node:path';
 import { closeTmuxRenderer } from './paint';
+import { setRasterScale } from './raster';
 import { getAllowPassthrough, getTmuxVersion, isTmuxSession, mouseEnabled } from './tty/tmux';
 
 // ps/pane_current_command read /proc/self/comm, which the kernel resets from
@@ -33,6 +34,7 @@ let homepage = 'https://github.com/chase/awrit';
 
 function loadConfig(config: typeof import('../config.js')) {
   if (config.homepage) homepage = config.homepage;
+  if (config.rasterScale != null) setRasterScale(config.rasterScale);
   if (config.keybindings) {
     if (process.platform === 'darwin') {
       Object.assign(config.keybindings, config.keybindings.mac);

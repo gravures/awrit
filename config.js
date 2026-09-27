@@ -3,6 +3,17 @@
  **/
 const homepage = 'https://github.com/chase/awrit';
 
+/** Raster scale
+ *
+ * Pane pixels divided by this is the bitmap Electron renders; the terminal
+ * stretches it back over the same cells, so 2 means a quarter of the pixels,
+ * upscaled 2x by the terminal. Encode gets ~4x cheaper and text gets twice as
+ * large, at the cost of soft edges. Any positive number works (1.5, 2.5, ...);
+ * 1 is 1:1 with the pane. Not an integer: match your terminal's own text
+ * density, which is whatever makes page text match cell text.
+ **/
+const rasterScale = 2;
+
 /** Keybindings
  *
  * @typedef {import('./src/keybindings').KeyBindingAction} KeyBindingAction
@@ -77,7 +88,7 @@ const keybindings = {
     // Zoom controls
     '<A-=>': zoomIn,
     '<A-minus>': zoomOut,
-    '<C-0>': zoomReset,
+    '<A-0>': zoomReset,
   },
 };
 
@@ -388,6 +399,7 @@ function zoomReset({ view }) {
 
 const config = {
   homepage,
+  rasterScale,
   keybindings,
 };
 

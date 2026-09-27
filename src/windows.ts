@@ -42,6 +42,7 @@ import {
   type LayoutNode,
 } from './layout';
 import { getDisplayScale } from './dpi';
+import { cellSpan, getRasterScale, setPaneToBitmap } from './raster';
 import { features } from './features';
 import { updateCursor } from './tty/cursor';
 import { debounce } from './debounce';
@@ -75,6 +76,33 @@ export const windowViews = new WeakMap<BrowserWindow, WindowView>();
 const TOOLBAR_HEIGHT = 40;
 
 /**
+ * Toolbar height in DIP, snapped to one terminal cell so the terminal stretches
+ * the toolbar by the same factor it stretches the content. 1.5px on a 42px
+ * cell — cheap to keep aligned, and it keeps toolbar and page text the same
+ * size. Falls back to the flat 40 when the pane reports no rows.
+ */
+function toolbarHeight(rows: number | undefined, paneHeight: number, raster: number) {
+  if (!rows || rows <= 0) return TOOLBAR_HEIGHT;
+  const cellInRasterPx = paneHeight / rows / raster;
+  if (!Number.isFinite(cellInRasterPx) || cellInRasterPx <= 0) return TOOLBAR_HEIGHT;
+  return Math.max(1, Math.round(cellInRasterPx));
+}
+
+/**
+ * Layout for a pane of `size` physical px. `size` arrives from TIOCGWINSZ and
+ * Electron reads it as DIP, so dividing by the raster scale is what produces the
+ * smaller bitmap. Records the bitmap:pane ratio too: the paint handlers measure
+ * in bitmap px and need the terminal cell size in those same units.
+ */
+function layoutForPane(size: { width: number; height: number }) {
+  const raster = getRasterScale();
+  const displayScale = getDisplayScale() ?? screen.getPrimaryDisplay().scaleFactor;
+  const container = layout(size.width / raster, size.height / raster, displayScale);
+  setPaneToBitmap(displayScale / raster);
+  return container;
+}
+
+/**
  * NOTE: the happens before load but after frame navigate
  * this is necessary because zoom can only be set when a URL is associated with the webContents
  *
@@ -87,7 +115,7 @@ function resetForFrameQuirk(webContents: WebContents) {
   });
 }
 
-type Size = { width: number; height: number };
+type Size = { width: number; height: number; rows?: number };
 // this deals with the DPI scale rounding error causing the buffer to be too small
 function padSize(size: Size): Size {
   return {
@@ -119,18 +147,14 @@ export function updateFrameRates() {
  * @returns The created window
  */
 export async function createWindowWithToolbar(
-  size: { width: number; height: number },
+  size: { width: number; height: number; rows?: number },
   initialUrl = 'https://github.com/chase/awrit',
 ): Promise<WindowView> {
-  // Create layout container with device pixel dimensions
-  const layoutContainer = layout(
-    size.width,
-    size.height,
-    getDisplayScale() ?? screen.getPrimaryDisplay().scaleFactor,
-  );
+  const raster = getRasterScale();
+  const layoutContainer = layoutForPane(size);
 
   // Create layout nodes for toolbar and content
-  const toolbarNode = row({ height: px(TOOLBAR_HEIGHT), tag: 'toolbar' });
+  const toolbarNode = row({ height: px(toolbarHeight(size.rows, size.height, raster)), tag: 'toolbar' });
   const contentNode = row({ height: auto(), tag: 'content' });
 
   const hasAnimation = features.current?.loadFrame && features.current.compositeFrame;
@@ -275,16 +299,24 @@ export async function createWindowWithToolbar(
 
   // let lastPaintSize: WindowDimensions = padSize(size);
 
-  function registerPaints(size: Size) {
+  function registerPaints(bitmapSize: Size) {
     if (useTmuxRenderer) {
       destructors.push(
         registerPaintedContentTmux(toolbar, toolbarNode).destroy,
         registerPaintedContentTmux(content, contentNode).destroy,
       );
     } else if (hasAnimation) {
+      // Padded because composites are pixel rects and kitty answers EINVAL when
+      // one lands outside the image; the c/r span comes from the unpadded
+      // bitmap so the placement isn't a column wider than the pane.
+      const size = padSize(bitmapSize);
       const containerBuffer = new ShmGraphicBuffer(size.width * size.height * 4);
       containerBuffer.writeEmpty();
-      const containerFrame = paintInitialFrame(containerBuffer, size);
+      const containerFrame = paintInitialFrame(
+        containerBuffer,
+        size,
+        cellSpan(bitmapSize, getWindowSize()),
+      );
       destructors.push(
         containerFrame.free,
         registerPaintedContent(containerFrame, toolbar, toolbarNode).destroy,
@@ -324,7 +356,7 @@ export async function createWindowWithToolbar(
     }
   }
 
-  registerPaints(padSize(size));
+  registerPaints(layoutContainer.root.deviceLayout);
 
   // Add to extensions
   extensionsPromise.then((extensions) => {
@@ -406,21 +438,20 @@ export async function createWindowWithToolbar(
 
       const size = getWindowSize();
       updateViewSizes(view, size);
-      registerPaints(padSize(size));
+      registerPaints(view.layoutContainer.root.deviceLayout);
     }),
   );
 
   return view;
 }
 
-function updateViewSizes(view: WindowView, { width, height }: Size) {
+function updateViewSizes(view: WindowView, { width, height, rows }: Size) {
   const { toolbar, content, toolbarNode, contentNode } = view;
-  view.layoutContainer = layout(
-    width,
-    height,
-    getDisplayScale() ?? screen.getPrimaryDisplay().scaleFactor,
-  );
+  const raster = getRasterScale();
+  view.layoutContainer = layoutForPane({ width, height });
 
+  // The cell the toolbar snaps to changed with the pane; recompute before layout.
+  toolbarNode.height = px(toolbarHeight(rows, height, raster));
   calculateLayout(view.layoutContainer, [toolbarNode, contentNode]);
 
   // Update window sizes based on layout
