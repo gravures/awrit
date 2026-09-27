@@ -6,6 +6,7 @@ import {
   buildTmuxUploadCommands,
 } from './tmuxProtocol';
 import { getPaneState, type TmuxPaneState } from './tmux';
+import { perfEnd, perfTime, perfValue } from '../perf';
 
 type PaneBounds = {
   cols: number;
@@ -200,14 +201,22 @@ export class TmuxRenderer {
       const batch = [...this.pendingBySlot.values()];
       this.pendingBySlot.clear();
 
+      const assembleStart = perfTime();
       let output = SYNC_BEGIN;
       for (const request of batch) {
+        // ponytail: standing delivery sub-timers. Added by 06-04 Task 3 to find
+        // the bottleneck; kept because they are free when AWRIT_PERF is off and
+        // they are what proved delivery is terminal-bound, not ours.
+        let t = perfTime();
         const { upload: uploadCommands, placement } = buildTmuxUploadCommands(
           request.pngBuffer,
           request.imageId,
           request.cols,
           request.rows,
         );
+        perfEnd('deliver.upload', t);
+
+        t = perfTime();
         const placeholderLines = buildTmuxPlaceholderLines(
           request.imageId,
           request.startCol,
@@ -216,6 +225,7 @@ export class TmuxRenderer {
           request.rows,
           request.pane,
         );
+        perfEnd('deliver.placeholders', t);
 
         for (const wrapped of uploadCommands) {
           output += wrapped;
@@ -246,8 +256,15 @@ export class TmuxRenderer {
         }
       }
       output += SYNC_END;
+      perfEnd('deliver.assemble', assembleStart);
+      perfValue(
+        'deliver.pngKB',
+        Math.round(batch.reduce((n, r) => n + r.pngBuffer.length, 0) / 1024),
+      );
+      const writeStart = perfTime();
       try {
         writeAll(this.outputFd, output);
+        perfEnd('deliver.write', writeStart);
         for (const request of batch) {
           this.displayedImageBySlot.set(request.slotId, request.imageId);
         }
