@@ -20,6 +20,7 @@ version = "2.0.3"
 dependencies = [
  "base64",
  "bgra-to-rgba",
+ "color_quant",
  "crossterm",
  "napi",
  "napi-build",
@@ -64,6 +65,12 @@ name = "cfg_aliases"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+
+[[package]]
+name = "color_quant"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 
 [[package]]
 name = "convert_case"
