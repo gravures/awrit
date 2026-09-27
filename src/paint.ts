@@ -92,6 +92,7 @@ export function registerPaintedContent(
     const tArrive = perfTime();
     try {
       const imageSize = image.getSize();
+      perfGeometry(w, imageSize);
 
       const imageBufferSize = imageSize.width * imageSize.height * 4;
       if (result.buffer == null) {
@@ -146,6 +147,23 @@ function coordsFromPx(cellToPx: number, px: number) {
 
 function startCellFromPx(px: number, cellToPx: number) {
   return Math.max(0, Math.floor(px / cellToPx));
+}
+
+/**
+ * Log the frame↔pane pixel relationship (06-04 AC-1) for every path, not just
+ * tmux: frame is what we raster, pane is what the terminal can display, and
+ * `raster` is the config knob relating them. Without this the non-tmux paths
+ * are unmeasurable — a placement regression there is invisible in perf.log.
+ */
+function perfGeometry(w: BrowserWindow, imageSize: { width: number; height: number }) {
+  const termSize = getWindowSize();
+  const [dipW, dipH] = w.getContentSize();
+  perfValue('frame', `${imageSize.width}x${imageSize.height}`);
+  perfValue('pane', `${termSize.width}x${termSize.height}`);
+  perfValue('dip', `${dipW}x${dipH}`);
+  perfValue('scale', getDisplayScale() ?? screen.getPrimaryDisplay().scaleFactor);
+  perfValue('raster', getRasterScale());
+  return termSize;
 }
 
 // Overlay crop tracked in base-image cell indices. The bounding rect is
@@ -209,16 +227,7 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
     const tArrive = perfTime();
     try {
       const imageSize = image.getSize();
-      const termSize = getWindowSize();
-      // Frame↔pane pixel relationship (06-04 AC-1): frame is what we raster,
-      // pane is what the terminal can display. R = frame.width / termSize.width
-      // decides the readability fix; nothing here depends on it yet.
-      const [dipW, dipH] = w.getContentSize();
-      perfValue('frame', `${imageSize.width}x${imageSize.height}`);
-      perfValue('pane', `${termSize.width}x${termSize.height}`);
-      perfValue('dip', `${dipW}x${dipH}`);
-      perfValue('scale', getDisplayScale() ?? screen.getPrimaryDisplay().scaleFactor);
-      perfValue('raster', getRasterScale());
+      const termSize = perfGeometry(w, imageSize);
       const cellToPx = rasterCellToPx(termSize);
       const baseStartCol = startCellFromPx(layoutNode.deviceLayout.x, cellToPx.x);
       const baseStartRow = startCellFromPx(layoutNode.deviceLayout.y, cellToPx.y);
@@ -340,6 +349,7 @@ export function registerPaintedContentFallback(
     const tArrive = perfTime();
     try {
       const imageSize = image.getSize();
+      perfGeometry(w, imageSize);
       const imageBufferSize = imageSize.width * imageSize.height * 4;
 
       const position = {
