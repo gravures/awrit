@@ -42,3 +42,17 @@ test('the animation container is placed over the pane too', () => {
   expect(out).toContain('a=T');
   expect(out).toContain('c=103,r=27');
 });
+
+// CUP is 1-based while every cell coordinate here is 0-based. A missing shift
+// puts the image a whole row down and a column right.
+test('the cursor is moved with 1-based CUP rows and columns', () => {
+  const out = capture(() =>
+    paintImage(
+      buffer(),
+      { width: 978, height: 546 },
+      { x: { cell: 3, px: 0 }, y: { cell: 5, px: 0 } },
+      { cols: 103, rows: 26 },
+    ),
+  );
+  expect(out).toContain('[6;4H');
+});
