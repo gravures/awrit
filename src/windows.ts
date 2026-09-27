@@ -108,10 +108,12 @@ function layoutForPane(size: { width: number; height: number }) {
  *
  * This also prevents users from persisting zoom level which is bad, so we probably want
  * to store that somewhere if the user changes zoom and restore that number instead
+ *
+ * @param zoom zoom to (re)apply on every navigation, default 1
  */
-function resetForFrameQuirk(webContents: WebContents) {
+function resetForFrameQuirk(webContents: WebContents, zoom = 1) {
   webContents.once('did-frame-navigate', () => {
-    webContents.setZoomFactor(1);
+    webContents.setZoomFactor(zoom);
   });
 }
 
@@ -381,9 +383,15 @@ export async function createWindowWithToolbar(
       activate: false,
     });
   } else {
-    resetForFrameQuirk(toolbar.webContents);
     toolbar.webContents.loadFile('../dist/toolbar/index.html');
   }
+  // The toolbar's UI is sized in absolute px for a ~40px bar (h-6 inputs,
+  // text-sm, border-b-2). Its window is one raster cell tall, so at rasterScale 2
+  // that content no longer fits and Chromium clips it — the terminal then
+  // stretches the clipped bitmap 2x, which is what a squashed toolbar is. Laying
+  // it out at the full cell height and letting zoom shrink it into the raster
+  // reproduces the rasterScale 1 bar exactly, softer.
+  resetForFrameQuirk(toolbar.webContents, 1 / raster);
   resetForFrameQuirk(content.webContents);
   content.webContents.loadURL(initialUrl);
 
