@@ -105,8 +105,11 @@ pub fn encode_bgra_opaque(bgra: &[u8], width: u32, height: u32) -> Result<Option
     let px = (width as usize)
         .checked_mul(height as usize)
         .ok_or_else(|| "Frame dimensions overflow".to_string())?;
-    if width == 0 || height == 0 {
-        return Err("Frame dimensions must be non-zero".to_string());
+    // Zero-sized frames are "not ours to encode", not an error — the caller
+    // falls back to Electron exactly as it would for transparency, without
+    // polluting the failure counter on the first empty frame of a session.
+    if px == 0 {
+        return Ok(None);
     }
     let expected = px.checked_mul(4).ok_or_else(|| "Frame size overflows".to_string())?;
     if bgra.len() != expected {
@@ -231,8 +234,8 @@ pub fn encode_bgra_pal(bgra: &[u8], width: u32, height: u32) -> Result<Option<Ve
     let px = (width as usize)
         .checked_mul(height as usize)
         .ok_or_else(|| "Frame dimensions overflow".to_string())?;
-    if width == 0 || height == 0 {
-        return Err("Frame dimensions must be non-zero".to_string());
+    if px == 0 {
+        return Ok(None);
     }
     let expected = px.checked_mul(4).ok_or_else(|| "Frame size overflows".to_string())?;
     if bgra.len() != expected {
@@ -442,7 +445,9 @@ mod tests {
     #[test]
     fn rejects_malformed_input() {
         assert!(encode_bgra_opaque(&[0u8; 10], 4, 4).is_err());
-        assert!(encode_bgra_opaque(&[], 0, 4).is_err());
+        // Zero-size is a soft-refusal (falls back to Electron), not an error.
+        assert_eq!(encode_bgra_opaque(&[], 0, 4).unwrap(), None);
+        assert_eq!(encode_bgra_pal(&[], 0, 4).unwrap(), None);
         assert!(encode_bgra_opaque(&[], u32::MAX, u32::MAX).is_err());
         assert!(encode_bgra_pal(&[0u8; 10], 4, 4).is_err());
         assert!(encode_bgra_opaque(&[0u8; 16], 2, 2).is_ok());
