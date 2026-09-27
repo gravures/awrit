@@ -16,6 +16,8 @@ mod term;
 pub use term::*;
 mod input;
 pub use input::*;
+mod png_encode;
+pub use png_encode::*;
 
 #[napi(object)]
 pub struct DirtyRect {

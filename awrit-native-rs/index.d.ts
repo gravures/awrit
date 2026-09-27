@@ -18,6 +18,13 @@ export interface DirtyRect {
   height: number
 }
 
+/**
+ * Encode a BGRA bitmap to PNG, or return `None` if it has any transparency.
+ *
+ * `bgra` is exactly `width * height * 4` bytes in Electron's `toBitmap()` order.
+ */
+export declare function encodePngOpaque(bgra: Buffer, width: number, height: number): Buffer | null
+
 /** Get tmux pane size with 250ms caching. Falls back to regular window_size if not in tmux. */
 export declare function getTmuxPaneSize(): WindowSize
 

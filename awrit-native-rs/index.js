@@ -509,6 +509,7 @@ if (!nativeBinding) {
 
 module.exports = nativeBinding
 module.exports.ShmGraphicBuffer = nativeBinding.ShmGraphicBuffer
+module.exports.encodePngOpaque = nativeBinding.encodePngOpaque
 module.exports.getTmuxPaneSize = nativeBinding.getTmuxPaneSize
 module.exports.getWindowSize = nativeBinding.getWindowSize
 module.exports.isTmux = nativeBinding.isTmux
