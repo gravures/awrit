@@ -8,6 +8,7 @@ import { getDisplayScale } from './dpi';
 import { features } from './features';
 import type { LayoutNode } from './layout';
 import { perfCount, perfEnd, perfPending, perfTime, perfValue } from './perf';
+import { cellSpan, getRasterScale, rasterCellToPx } from './raster';
 import { createImageIdAllocator } from './tty/imageIds';
 import {
   type AnimationFrame,
@@ -143,14 +144,6 @@ function coordsFromPx(cellToPx: number, px: number) {
   };
 }
 
-function safeCellToPx(size: { cols: number; rows: number; width: number; height: number }) {
-  let x = size.width / size.cols;
-  let y = size.height / size.rows;
-  if (!Number.isFinite(x) || x <= 0) x = 1;
-  if (!Number.isFinite(y) || y <= 0) y = 1;
-  return { x, y };
-}
-
 function startCellFromPx(px: number, cellToPx: number) {
   return Math.max(0, Math.floor(px / cellToPx));
 }
@@ -225,7 +218,8 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
       perfValue('pane', `${termSize.width}x${termSize.height}`);
       perfValue('dip', `${dipW}x${dipH}`);
       perfValue('scale', getDisplayScale() ?? screen.getPrimaryDisplay().scaleFactor);
-      const cellToPx = safeCellToPx(termSize);
+      perfValue('raster', getRasterScale());
+      const cellToPx = rasterCellToPx(termSize);
       const baseStartCol = startCellFromPx(layoutNode.deviceLayout.x, cellToPx.x);
       const baseStartRow = startCellFromPx(layoutNode.deviceLayout.y, cellToPx.y);
       const pane = getPaneSize();
@@ -329,8 +323,7 @@ export function registerPaintedContentFallback(
 ): PaintedContent {
   const contents = w.webContents;
   const termSize = getWindowSize();
-  const cellToPxX = termSize.width / termSize.cols;
-  const cellToPxY = termSize.height / termSize.rows;
+  const { x: cellToPxX, y: cellToPxY } = rasterCellToPx(termSize);
   let paintedImage: PaintedImage | undefined;
 
   const result: PaintedContent = {
@@ -365,7 +358,7 @@ export function registerPaintedContentFallback(
         const buffer = new ShmGraphicBuffer(imageBufferSize);
         paintedImage?.free();
         buffer.write(bmp, imageSize.width);
-        paintedImage = paintImage(buffer, imageSize, position);
+        paintedImage = paintImage(buffer, imageSize, position, cellSpan(imageSize, termSize));
         perfEnd('paint.alloc', tAlloc);
 
         result.buffer = buffer;

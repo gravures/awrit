@@ -23,6 +23,20 @@ function rect_(rect: Rect) {
   return `,x=${rect.x},y=${rect.y},w=${rect.width},h=${rect.height}`;
 }
 
+/**
+ * Cells a placement fills. c/r are the number of columns/rows the terminal
+ * scales the image to fit, so this is what stretches a small raster back over
+ * the pane; without it a rasterScale 2 bitmap lands in the top-left quarter.
+ */
+export interface CellSpan {
+  cols: number;
+  rows: number;
+}
+
+function span_(span: CellSpan) {
+  return `,c=${span.cols},r=${span.rows}`;
+}
+
 function shmRgba_(nameBase64: string, size: Size, control: string) {
   // f=32 rgba 32-bit
   // t=s SHM name
@@ -49,10 +63,14 @@ export interface InitialFrame {
   free: () => void;
 }
 
-export function paintInitialFrame(buffer: ShmGraphicBuffer, size: Size): InitialFrame {
+export function paintInitialFrame(
+  buffer: ShmGraphicBuffer,
+  size: Size,
+  span: CellSpan,
+): InitialFrame {
   const id = imageId();
   // paint and transfer first frame
-  paintBitmap(buffer.nameBase64, size, `i=${id}`);
+  paintBitmap(buffer.nameBase64, size, `i=${id}${span_(span)}`);
   // pause at the first frame
   stdout.write(GFX`a=a,i=${id},c=1`);
 
@@ -123,10 +141,11 @@ export function paintImage(
   buffer: ShmGraphicBuffer,
   size: Size,
   position: { x: { cell: number; px: number }; y: { cell: number; px: number } },
+  span: CellSpan,
 ): PaintedImage {
   const id = imageId();
   placeCursor({ x: position.x.cell, y: position.y.cell });
-  const control = `i=${id},X=${position.x.px},Y=${position.y.px}`;
+  const control = `i=${id},X=${position.x.px},Y=${position.y.px}${span_(span)}`;
   paintBitmap(buffer.nameBase64, size, control);
 
   return {

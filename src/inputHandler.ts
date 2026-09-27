@@ -7,6 +7,7 @@ import {
   type MouseCoordinateMode,
 } from './tty/mouseCoordinates';
 import { invalidatePaneSizeCache, isTmuxSession } from './tty/tmux';
+import { getRasterScale } from './raster';
 import { focusedView, setTerminalIsFocused, updateFrameRates } from './windows';
 
 const WHEEL_DELTA = 100;
@@ -161,21 +162,24 @@ function handleInputEvent(evt: TermEvent) {
         return;
       }
 
-      const DPI_SCALE = view.layoutContainer.devicePixelRatio;
+      // Terminal coords are pane px; webContents wants raster px, which is
+      // pane px divided by the display scale *and* the raster scale. Fold both
+      // into one factor so the toolbar test below compares like with like.
+      const toRaster = view.layoutContainer.devicePixelRatio * getRasterScale();
       const rawX = x ?? 0;
       const rawY = y ?? 0;
       const normalized = maybeNormalizeTmuxMouseCoordinates(rawX, rawY);
-      const normalizedX = normalized.x;
-      const normalizedY = normalized.y;
+      const normalizedX = normalized.x / toRaster;
+      const normalizedY = normalized.y / toRaster;
 
       // Determine which region we're in based on layout
       const { toolbarNode, contentNode } = view;
       const isInToolbar = normalizedY < contentNode.deviceLayout.y;
 
       // Calculate position relative to the target component
-      const adjustedX = Math.floor(normalizedX / DPI_SCALE);
+      const adjustedX = Math.floor(normalizedX);
       const adjustedY = Math.floor(
-        (normalizedY - (isInToolbar ? 0 : toolbarNode.deviceLayout.height)) / DPI_SCALE,
+        normalizedY - (isInToolbar ? 0 : toolbarNode.deviceLayout.height),
       );
 
       const focusedContent = isInToolbar ? view.toolbar.webContents : view.content.webContents;
