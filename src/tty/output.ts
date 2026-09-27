@@ -28,8 +28,15 @@ export function requestWindowSize() {
   stdout.write(CSI`14t`);
 }
 
+/**
+ * Park the cursor at a cell. Takes 0-based cell coordinates like the rest of the
+ * graphics code (`a=p`, placement cells, cell indices), but CUP rows and columns
+ * are 1-based — without the shift the terminal places an image one row down and
+ * one column right of the intended cell, i.e. a full toolbar row of
+ * misalignment plus a clipped column on the non-tmux paths.
+ */
 export function placeCursor(point: Point = { x: 0, y: 0 }) {
-  stdout.write(CSI`${point.y};${point.x}H`);
+  stdout.write(CSI`${point.y + 1};${point.x + 1}H`);
 }
 
 export enum Mode {
