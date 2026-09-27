@@ -1,4 +1,4 @@
-import { encodePngOpaque, getWindowSize, ShmGraphicBuffer } from 'awrit-native-rs';
+import { encodePngOpaque, encodePngPal, getWindowSize, ShmGraphicBuffer } from 'awrit-native-rs';
 import type { BrowserWindow, NativeImage, Rectangle } from 'electron';
 import { screen } from 'electron';
 import { abort } from './abort';
@@ -233,6 +233,15 @@ function unionCells(a: CellRegion, b: CellRegion): CellRegion {
 function encodeTmuxPng(source: NativeImage): Buffer {
   try {
     const { width, height } = source.getSize();
+    // Preferred: indexed/palette. 60-84% fewer bytes than Electron and a
+    // 12-32ms encode on the captured frames; the palette is reused across
+    // frames so the NeuQuant cost amortises. Falls back to truecolour if the
+    // quantiser fails, then to Electron only for transparent frames.
+    const pal = encodePngPal(source.toBitmap(), width, height);
+    if (pal) {
+      perfCount('submit.png.pal');
+      return pal;
+    }
     const native = encodePngOpaque(source.toBitmap(), width, height);
     if (native) {
       perfCount('submit.png.native');
