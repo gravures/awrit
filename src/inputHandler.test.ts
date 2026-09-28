@@ -45,6 +45,24 @@ describe('buildWheelEvent', () => {
       deltaY: 0,
     });
   });
+
+  test('scale halves deltas (constant page fraction per tick) but not wheel ticks', () => {
+    expect(buildWheelEvent('scrollDown', [], 0, 0, 2)).toMatchObject({
+      deltaY: -50,
+      deltaX: 0,
+      wheelTicksY: -1,
+      wheelTicksX: 0,
+    });
+    expect(buildWheelEvent('scrollRight', ['shift'], 5, 6, 2)).toMatchObject({
+      deltaX: 50,
+      deltaY: 0,
+      wheelTicksX: 1,
+      x: 5,
+      y: 6,
+    });
+    // fractional scales (displayScale × rasterScale need not be integer)
+    expect(buildWheelEvent('scrollDown', [], 0, 0, 1.5).deltaY).toBeCloseTo(-200 / 3);
+  });
 });
 
 describe('inputHandler tmux mouse normalization', () => {

@@ -60,15 +60,20 @@ export function buildWheelEvent(
   modifiers: ('ctrl' | 'alt' | 'shift')[],
   x: number,
   y: number,
+  scale = 1,
 ) {
   const vertical = kind === 'scrollUp' || kind === 'scrollDown';
   const sign = kind === 'scrollUp' || kind === 'scrollRight' ? 1 : -1;
+  // deltaY is CSS px, but the CSS viewport shrinks as display/raster scale
+  // grows — divide by the same toRaster factor mouse coords use so one tick
+  // always scrolls the same fraction of the visible page (06-06 Task 1).
+  const delta = sign * WHEEL_DELTA / scale;
   return {
     type: 'mouseWheel' as const,
     wheelTicksY: vertical ? sign : 0,
     wheelTicksX: vertical ? 0 : sign,
-    deltaX: vertical ? 0 : sign * WHEEL_DELTA,
-    deltaY: vertical ? sign * WHEEL_DELTA : 0,
+    deltaX: vertical ? 0 : delta,
+    deltaY: vertical ? delta : 0,
     modifiers,
     x,
     y,
@@ -191,7 +196,7 @@ function handleInputEvent(evt: TermEvent) {
         kind === 'scrollRight'
       ) {
         view.content.webContents.sendInputEvent(
-          buildWheelEvent(kind, modifiers, adjustedX, adjustedY),
+          buildWheelEvent(kind, modifiers, adjustedX, adjustedY, toRaster),
         );
         break;
       }
