@@ -78,7 +78,10 @@ export function buildWheelEvent(
     x,
     y,
     accelerationRatioY: 0.5,
-    hasPreciseScrollingDeltas: false,
+    // Precise pixels: Blink applies the delta directly instead of routing it
+    // through line-scroll + smooth animation (which queued ticks behind a
+    // dead-looking void, then jumped and eased out — 06-06 checkpoint 2).
+    hasPreciseScrollingDeltas: true,
     canScroll: true,
   };
 }
