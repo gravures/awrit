@@ -41,6 +41,15 @@ export class FrameCoalescer<T> {
     return this.dropped;
   }
 
+  /**
+   * True when a newer frame is waiting behind the in-flight drain. Lets a
+   * drain skip stale work it would otherwise do (06-06: a yield-before-work
+   * drain checks this and lets the pump take the newest instead).
+   */
+  get hasPending(): boolean {
+    return this.pending !== undefined;
+  }
+
   /** Resolves once the queue is empty and no drain is in flight. */
   async idle(): Promise<void> {
     // `pump` is a no-op once nothing is pending, so awaiting it settles the
