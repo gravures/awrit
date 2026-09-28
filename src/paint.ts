@@ -36,6 +36,13 @@ type PaintJob = {
   cells: CellRegion | null;
 };
 
+/** A fallback frame plus its arrival time, so the coalescing wait stays
+ * visible in the arrive→encode segment instead of distorting it. */
+type FallbackFrame = {
+  image: NativeImage;
+  tArrive: number | undefined;
+};
+
 type PaintedContent = {
   frame?: AnimationFrame;
   buffer?: ShmGraphicBuffer;
@@ -432,7 +439,6 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
   weakPaintedContents_.set(w, result);
   return result;
 }
-
 export function registerPaintedContentFallback(
   w: BrowserWindow,
   layoutNode: LayoutNode,
@@ -441,9 +447,11 @@ export function registerPaintedContentFallback(
   const termSize = getWindowSize();
   const { x: cellToPxX, y: cellToPxY } = rasterCellToPx(termSize);
   let paintedImage: PaintedImage | undefined;
+  let destroyed = false;
 
   const result: PaintedContent = {
     destroy() {
+      destroyed = true;
       contents.off('paint', paint);
       this.buffer = undefined;
       paintedImage?.free();
@@ -451,9 +459,36 @@ export function registerPaintedContentFallback(
     },
   };
 
-  async function paint(_: any, _dirty: Rectangle, image: NativeImage) {
+  // One-slot keep-newest buffer in front of the expensive work (06-06 Task 2).
+  // Every frame costs a synchronous ~35-45ms toBitmap + shm write on the main
+  // thread, so during scroll the paint events used to queue up faster than
+  // they drained and the session degraded — and that backlog is not per-page
+  // state, so a page load never recovered it. The drain yields one macrotask
+  // before doing anything: events already queued behind this one dispatch as
+  // cheap offers and collapse onto the slot, so only the newest pays the cost.
+  // A synchronous drain inside offer() would coalesce nothing — that is the
+  // whole reason for the yield.
+  const coalescer = new FrameCoalescer<FallbackFrame>((frame) => drain(frame));
+
+  function paint(_: any, _dirty: Rectangle, image: NativeImage) {
+    try {
+      if (coalescer.offer({ image, tArrive: perfTime() }) > 0) {
+        perfCount('paint.superseded');
+      }
+    } catch (error) {
+      // A paint failure must not become an unhandled rejection (06-02 lesson).
+      console_.error('fallback paint failed', error);
+    }
+  }
+
+  async function drain({ image, tArrive }: FallbackFrame): Promise<void> {
+    // Yield first so already-queued paint events dispatch and collapse — see
+    // the coalescer note above.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Stale or torn down: a newer frame owns the slot, or destroy() ran while
+    // we were yielding. Skip the work; the pump drains what is pending.
+    if (destroyed || coalescer.hasPending) return;
     perfPending('paint', 1);
-    const tArrive = perfTime();
     try {
       const imageSize = image.getSize();
       perfGeometry(w, imageSize);
@@ -484,6 +519,7 @@ export function registerPaintedContentFallback(
       if (options['debug-paint']) {
         console_.error('paint', result.buffer.nameBase64, image.getSize());
       }
+
       if (options['no-paint']) {
         return;
       }
