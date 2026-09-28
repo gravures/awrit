@@ -191,6 +191,11 @@ export async function createWindowWithToolbar(
       offscreen: true,
       nodeIntegration: false,
       contextIsolation: true,
+      // Windows stay show:false forever, so without this the renderer runs as
+      // a backgrounded page: idle frames throttle to ~1Hz and the first scroll
+      // after rest waits up to a second for a frame (06-06 checkpoint: "1sec
+      // nothing, then a jump"). ODR must never background-throttle.
+      backgroundThrottling: false,
 
       preload: path.resolve(__dirname, '../dist/preload.js'),
     },
@@ -210,6 +215,9 @@ export async function createWindowWithToolbar(
       offscreen: true,
       nodeIntegration: false,
       contextIsolation: true,
+      // See toolbar: show:false windows would otherwise idle-throttle frames
+      // to ~1Hz and delay the first scroll frame by up to a second.
+      backgroundThrottling: false,
       disableDialogs: true,
     },
   });
