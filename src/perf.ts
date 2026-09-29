@@ -83,7 +83,43 @@ export function flushBucket(): string | undefined {
   return parts.join(' ');
 }
 
+/** 1s system snapshot: avg CPU freq (MHz, 8-core mean — parked cores skew it
+ * low), highest core freq (MHz — did anything boost this second), coretemp
+ * (°C), process memory (MB). Coarse trend indicators only, never a diagnosis. */
+function sampleSystem() {
+  try {
+    let sum = 0;
+    let max = 0;
+    let n = 0;
+    for (let i = 0; i < 8; i++) {
+      try {
+        const f = Number(fs.readFileSync(`/sys/devices/system/cpu/cpu${i}/cpufreq/scaling_cur_freq`));
+        sum += f;
+        if (f > max) max = f;
+        n++;
+      } catch {}
+    }
+    if (n > 0) {
+      perfValue('freq', Math.round(sum / n / 1000));
+      perfValue('fmax', Math.round(max / 1000));
+    }
+  } catch {}
+  try {
+    for (const ent of fs.readdirSync('/sys/class/hwmon')) {
+      const base = `/sys/class/hwmon/${ent}`;
+      if (fs.readFileSync(`${base}/name`, 'utf8').trim() !== 'coretemp') continue;
+      perfValue('temp', Math.round(Number(fs.readFileSync(`${base}/temp1_input`)) / 1000));
+      break;
+    }
+  } catch {}
+  try {
+    const m = process.memoryUsage();
+    perfValue('mem', Math.round((m.heapUsed + m.external) / 1048576));
+  } catch {}
+}
+
 function flushToFile() {
+  sampleSystem();
   const line = flushBucket();
   if (!line) return;
   try {

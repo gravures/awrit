@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { encodePngOpaque, encodePngPal, getWindowSize, ShmGraphicBuffer } from 'awrit-native-rs';
 import type { BrowserWindow, NativeImage, Rectangle } from 'electron';
 import { screen } from 'electron';
@@ -77,6 +78,34 @@ function createTmuxRenderer(): TmuxPaintRenderer | null {
 
 const tmuxRenderer = createTmuxRenderer();
 const allocateTmuxImageId = createImageIdAllocator();
+
+// Mirrors perf.ts: read once at load, so the probe below costs nothing when off.
+const perfEnabled = process.env.AWRIT_PERF === '1';
+
+/**
+ * Count shm-backed fds (memfd + /dev/shm) this process holds. 06-06 starvation
+ * probe: during scroll Electron emits ever fewer paint events (12/s → 5/s over
+ * ~60s at constant input) while our coalescer stays idle — a *rising* count
+ * means frames' shared memory is pinned awaiting GC and the capturer's buffer
+ * pool starves (fixable here); *flat* means frame production itself degrades
+ * inside Electron. Never throws: no /proc → 0.
+ */
+function countShmFds(): number {
+  let n = 0;
+  try {
+    for (const fd of fs.readdirSync('/proc/self/fd')) {
+      try {
+        const link = fs.readlinkSync(`/proc/self/fd/${fd}`);
+        if (link.includes('memfd') || link.startsWith('/dev/shm/')) n++;
+      } catch {
+        // fd closed between readdir and readlink
+      }
+    }
+  } catch {
+    // non-Linux or /proc unavailable
+  }
+  return n;
+}
 
 export function closeTmuxRenderer() {
   tmuxRenderer?.close();
@@ -453,6 +482,7 @@ export function registerPaintedContentFallback(
     destroy() {
       destroyed = true;
       contents.off('paint', paint);
+      if (rafTimer) clearInterval(rafTimer);
       this.buffer = undefined;
       paintedImage?.free();
       paintedImage = undefined;
@@ -530,6 +560,8 @@ export function registerPaintedContentFallback(
         perfEnd('paint.replace', tReplace);
       }
       perfEnd('paint.arrive→encode', tArrive);
+      if (perfEnabled) perfValue('shmfd', countShmFds());
+      if (perfEnabled) perfValue('fr', contents.getFrameRate());
       perfCount('paint.completed');
     } catch (error) {
       // Same containment as the animation handler: never let a paint error
@@ -540,6 +572,32 @@ export function registerPaintedContentFallback(
     }
   }
   contents.on('paint', paint);
+  // 06-06 probe: renderer-side animation ticks per second. raf≈60 while
+  // paint≈10 → production is fine and the browser main thread (our drain) is
+  // the cap; raf≈paint → frames aren't even being produced. beginFrameSubscription
+  // was blind here (never fires for offscreen), so count rAF in the page.
+  // Re-injected after navigation; all failures swallowed (perf must never
+  // touch the session).
+  let rafTimer: ReturnType<typeof setInterval> | undefined;
+  const injectRaf = () => {
+    contents
+      .executeJavaScript(
+        '(()=>{let n=0;const t=()=>{n++;requestAnimationFrame(t)};requestAnimationFrame(t);window.__awritRaf=()=>{const v=n;n=0;return v};return 1})()',
+      )
+      .catch(() => {});
+  };
+  if (perfEnabled) {
+    injectRaf();
+    rafTimer = setInterval(() => {
+      contents
+        .executeJavaScript('window.__awritRaf ? window.__awritRaf() : -1')
+        .then((v) => {
+          if (v === -1) injectRaf();
+          else if (typeof v === 'number') perfValue('raf', v);
+        })
+        .catch(() => {});
+    }, 1000);
+  }
 
   weakPaintedContents_.set(w, result);
   return result;
