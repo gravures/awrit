@@ -12,7 +12,7 @@ import { createWindowWithToolbar } from './windows';
 import { console_ } from './console';
 import { options } from './args';
 import { features } from './features';
-import { clearPlacements } from './tty/kittyGraphics';
+import { clearPlacements, gfxAck } from './tty/kittyGraphics';
 import { loadKeyBindings } from './keybindings';
 import { getForcedTmuxMouseCoordinateMode } from './tty/mouseCoordinates';
 import fs from 'node:fs';
@@ -127,8 +127,14 @@ function inputHandler(evt: TermEvent) {
   }
 
   // Graphics protocol events now come through graphics events
-  if (options['debug-paint'] && evt.eventType === 'graphics') {
-    console_.error('Graphics protocol: ', evt.graphics);
+  if (evt.eventType === 'graphics') {
+    const g = evt.graphics;
+    if (g) {
+      // Resolve the send→display round trip, which is what tells us whether
+      // the terminal is keeping pace or falling behind.
+      if (g.status === 'OK') gfxAck();
+      if (options['debug-paint']) console_.error('Graphics protocol: ', g);
+    }
   }
 
   handleInput(evt);

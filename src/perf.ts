@@ -28,6 +28,10 @@ export function perfCount(name: string) {
   ensureTimer();
 }
 
+export function perfEnabled(): boolean {
+  return enabled;
+}
+
 export function perfTime(): number | undefined {
   return enabled ? performance.now() : undefined;
 }
