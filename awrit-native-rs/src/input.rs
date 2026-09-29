@@ -1,6 +1,6 @@
 use crossterm::event::{
-  poll, read, Event, KeyCode, KeyModifiers, MediaKeyCode, ModifierKeyCode, MouseButton,
-  MouseEventKind, Sequence,
+  poll, read, Event, KeyCode, KeyModifiers, KittyGraphicsOkOrError, MediaKeyCode, ModifierKeyCode,
+  MouseButton, MouseEventKind, Sequence,
 };
 use napi::{
   bindgen_prelude::*, threadsafe_function::ThreadsafeFunctionCallMode, Env, Result, Status,
@@ -286,7 +286,14 @@ impl From<Event> for TermEvent {
         escape: None,
         graphics: Some(KittyGraphics {
           id: data,
-          status: format!("{:?}", status),
+          // The protocol's own status text, not the Debug form: JS matches
+          // "OK" to decide the terminal consumed the frame, and "Ok" never
+          // matches.
+          status: match status {
+            KittyGraphicsOkOrError::Ok => "OK".to_string(),
+            KittyGraphicsOkOrError::Error(e) if e.is_empty() => "NONE".to_string(),
+            KittyGraphicsOkOrError::Error(e) => e,
+          },
         }),
       },
     }
