@@ -212,7 +212,13 @@ export async function createWindowWithToolbar(
       session: await sessionPromise,
 
       sandbox: true,
-      offscreen: true,
+      // Take the frame as a GPU dmabuf instead of a CPU bitmap, so the pixels
+      // are not copied into a NativeImage before the shm write. The read is
+      // still ~20ms, so this is not automatically faster (see .paul for the
+      // measured numbers). Only here: the tmux and Kitty-animation renderers
+      // both need the CPU bitmap, and in this mode the paint event carries an
+      // *empty* bitmap, so those two are unaffected.
+      offscreen: !useTmuxRenderer && !hasAnimation ? { useSharedTexture: true } : true,
       nodeIntegration: false,
       contextIsolation: true,
       // See toolbar: show:false windows would otherwise idle-throttle frames

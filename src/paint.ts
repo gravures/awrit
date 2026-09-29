@@ -1,5 +1,12 @@
 import fs from 'node:fs';
-import { encodePngOpaque, encodePngPal, getWindowSize, ShmGraphicBuffer } from 'awrit-native-rs';
+import {
+  encodePngOpaque,
+  encodePngPal,
+  getWindowSize,
+  pinTexture,
+  ShmGraphicBuffer,
+  unpinTexture,
+} from 'awrit-native-rs';
 import type { BrowserWindow, NativeImage, Rectangle } from 'electron';
 import { screen } from 'electron';
 import { abort } from './abort';
@@ -477,6 +484,15 @@ export function registerPaintedContentFallback(
   const { x: cellToPxX, y: cellToPxY } = rasterCellToPx(termSize);
   let paintedImage: PaintedImage | undefined;
   let destroyed = false;
+  // 06-06 probe: when the previous frame finished. `paint.gap` is the idle time
+  // between frames. Measured on the shared-texture path: gap is mostly idle
+  // against the per-frame work, so the drain is not saturated. Which stage
+  // bounds the rate is not settled by this timer — see the notes in .paul.
+  // Yielding again before the shm write to widen the window was tried
+  // and reverted: it moved throughput 4→5.3 paints/s (inside the noise) while
+  // roughly doubling arrive→encode latency. `raf` alone cannot tell upstream
+  // throttle from our own cost; `gap` can.
+  let lastDone: number | undefined;
 
   const result: PaintedContent = {
     destroy() {
@@ -500,14 +516,125 @@ export function registerPaintedContentFallback(
   // whole reason for the yield.
   const coalescer = new FrameCoalescer<FallbackFrame>((frame) => drain(frame));
 
-  function paint(_: any, _dirty: Rectangle, image: NativeImage) {
+  function paint(event: any, _dirty: Rectangle, image: NativeImage) {
     try {
+      // GPU shared-texture frame (06-06). Electron passes an *empty* bitmap in
+      // this mode, so this is the only source of pixels — but it is also 3-4x
+      // faster than the shm capture, which is capped at 5-10 paints/s while the
+      // renderer runs at 60 (see .paul/codebase/ARCHITECTURE.md).
+      const texture = event?.texture;
+      if (texture) {
+        paintTexture(texture);
+        return;
+      }
+      // In shared-texture mode the bitmap is always empty, so a paint with a
+      // real bitmap here means Electron changed its mind. Never blit an empty
+      // image — that would push garbage to the terminal.
+      if (image.isEmpty()) {
+        perfCount('paint.emptyBitmap');
+        return;
+      }
       if (coalescer.offer({ image, tArrive: perfTime() }) > 0) {
         perfCount('paint.superseded');
       }
     } catch (error) {
       // A paint failure must not become an unhandled rejection (06-02 lesson).
       console_.error('fallback paint failed', error);
+    }
+  }
+
+  // Textures cannot be coalesced: only a handful may exist at once, so each one
+  // is pinned and handed straight back, and the pixels are read from the pin
+  // afterwards. The texture is therefore not held for the ~20ms read.
+  function paintTexture(texture: any) {
+    // Electron's release is not documented as idempotent, so do it exactly once.
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      texture.release();
+    };
+    try {
+      if (destroyed || options['no-paint']) {
+        release();
+        return;
+      }
+      const info = texture.textureInfo;
+      const plane = info?.planes?.[0];
+      const imageSize = { width: info.codedSize.width, height: info.codedSize.height };
+      // Guard the zero-size frame the compositor emits on resize (06-06 log).
+      if (!plane || imageSize.width === 0 || imageSize.height === 0) {
+        release();
+        return;
+      }
+
+      perfGeometry(w, imageSize);
+      const imageBufferSize = imageSize.width * imageSize.height * 4;
+      const position = {
+        x: coordsFromPx(cellToPxX, layoutNode.deviceLayout.x),
+        y: coordsFromPx(cellToPxY, layoutNode.deviceLayout.y),
+      };
+      if (perfEnabled) {
+        const geom = `${imageSize.width}x${imageSize.height}`;
+        const layout = `${plane.stride}/${plane.offset}/${plane.size}`;
+        const rect = info.contentRect;
+        const dirty = rect ? `${rect.width}x${rect.height}@${rect.x},${rect.y}` : 'none';
+        perfValue('tex', `${info.pixelFormat} ${geom} ${layout} ${info.modifier} ${dirty}`);
+      }
+
+      // Pin before releasing: dup'ing the fd keeps the dmabuf alive, so the
+      // capturer gets its texture back after ~0.2ms instead of after the 25ms
+      // read, and can run ahead while we copy. Holding the texture is what
+      // throttled the frame rate, not the copy (see .paul/codebase/ARCHITECTURE.md).
+      const tPin = perfTime();
+      const pin = pinTexture(
+        plane.fd,
+        imageSize.width,
+        imageSize.height,
+        plane.stride,
+        plane.offset,
+        plane.size,
+      );
+      perfEnd('paint.tex.pin', tPin);
+      release();
+
+      try {
+        const tWrite = perfTime();
+        if (result.buffer == null || (result.size != null && imageBufferSize > result.size)) {
+          // First frame, or the pane grew: a fresh shm and a fresh placement.
+          paintedImage?.free();
+          const fresh = new ShmGraphicBuffer(imageBufferSize);
+          fresh.writeTexture(pin, info.pixelFormat === 'bgra');
+          paintedImage = paintImage(fresh, imageSize, position, cellSpan(imageSize, termSize));
+          result.buffer = fresh;
+          result.size = imageBufferSize;
+        } else {
+          result.buffer.writeTexture(pin, info.pixelFormat === 'bgra');
+          paintedImage?.present();
+        }
+        perfEnd('paint.tex.write', tWrite);
+        if (perfEnabled) {
+          // Split the blit: [shm open+truncate+map, convert, unmap]. The convert
+          // is the GPU read; the other two are our own per-frame syscall tax.
+          const [map, convert, unmap] = result.buffer.timings();
+          perfValue('texmap', map.toFixed(1));
+          perfValue('texconvert', convert.toFixed(1));
+          perfValue('texunmap', unmap.toFixed(1));
+          perfValue('shmfd', countShmFds());
+        }
+        perfEnd('paint.gap', lastDone);
+        lastDone = perfTime();
+        perfCount('paint.tex');
+        perfCount('paint.completed');
+      } finally {
+        // The pin is consumed by write_texture, but if the blit threw before
+        // reaching it, drop the mapping here — a leaked dmabuf mapping pins
+        // GPU memory for the life of the process.
+        unpinTexture(pin);
+      }
+    } finally {
+      // No-op if already released above or on an early return.
+      release();
     }
   }
 
@@ -518,6 +645,7 @@ export function registerPaintedContentFallback(
     // Stale or torn down: a newer frame owns the slot, or destroy() ran while
     // we were yielding. Skip the work; the pump drains what is pending.
     if (destroyed || coalescer.hasPending) return;
+    perfEnd('paint.gap', lastDone);
     perfPending('paint', 1);
     try {
       const imageSize = image.getSize();
@@ -563,6 +691,7 @@ export function registerPaintedContentFallback(
       if (perfEnabled) perfValue('shmfd', countShmFds());
       if (perfEnabled) perfValue('fr', contents.getFrameRate());
       perfCount('paint.completed');
+      lastDone = perfTime();
     } catch (error) {
       // Same containment as the animation handler: never let a paint error
       // escape as an unhandled rejection.
