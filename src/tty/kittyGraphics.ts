@@ -88,10 +88,12 @@ function shmRgba_(nameBase64: string, size: Size, control: string) {
   stdout.write(GFX`f=32,t=s${sv_size_(size)},${control};${nameBase64}`);
 }
 
-function paintBitmap(name: string, size: Size, control?: string) {
-  // a=T transfer & display
+type PaintMode = 'T' | 't';
+
+function paintBitmap(name: string, size: Size, control?: string, mode: PaintMode = 'T') {
+  // a=T transfer & display, a=t transfer only (update existing image)
   // C=1 don't move cursor
-  shmRgba_(name, size, `a=T${quiet()},C=1${control == null ? '' : ',' + control}`);
+  shmRgba_(name, size, `a=${mode}${quiet()},C=1${control == null ? '' : ',' + control}`);
   // The ack is keyed by the image id in `control`; frame uploads (a=f) are
   // tracked separately since they carry r= rather than i=.
   if (responses()) {
@@ -199,7 +201,8 @@ export function paintImage(
   const id = imageId();
   placeCursor({ x: position.x.cell, y: position.y.cell });
   const control = `i=${id},X=${position.x.px},Y=${position.y.px}${span_(span)}`;
-  paintBitmap(buffer.nameBase64, size, control);
+  // Initial frame uses a=T (transfer & display)
+  paintBitmap(buffer.nameBase64, size, control, 'T');
 
   // Re-emit the copy command for an already-filled buffer. The GPU texture path
   // (06-06) writes the pixels straight into the shm, so it has nothing to hand
@@ -207,7 +210,8 @@ export function paintImage(
   const present = () => {
     const tOut = perfTime();
     placeCursor({ x: position.x.cell, y: position.y.cell });
-    paintBitmap(buffer.nameBase64, size, control);
+    // Subsequent frames use a=t (transfer only) – cheaper on Ghostty
+    paintBitmap(buffer.nameBase64, size, control, 't');
     perfEnd('paint.replace.stdout', tOut);
   };
 
