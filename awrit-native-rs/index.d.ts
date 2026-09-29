@@ -7,8 +7,22 @@ export declare class ShmGraphicBuffer {
   get nameBase64(): string
   /** Creates and truncates the shared memory segment to the specified size, filling it with zeros */
   writeEmpty(): void
+  /**
+   * Cost of the last `write_texture`, in ms: (shm map, convert, unmap).
+   * Diagnostics only — reading it costs a lock, so it is off the hot path in JS.
+   */
+  timings(): number[]
   /** Writes an image buffer to the shared memory at the specified dirty rectangle */
   write(buffer: Buffer, imageWidth: number, dirtyRect?: DirtyRect | undefined | null): void
+  /**
+   * Reads a texture pinned by `pin_texture` into the shared memory, skipping
+   * the CPU-side `NativeImage` copy entirely. Row padding is dropped.
+   *
+   * Consumes the pin. Prefer this over `write_texture` when the caller can
+   * release the Electron texture before reading, so the texture is not held
+   * for the duration of the read.
+   */
+  writeTexture(id: number, swap: boolean): void
 }
 
 export interface DirtyRect {
@@ -66,6 +80,19 @@ export interface MouseEvent {
 /** Send the given sequence directly to the client terminal passing through tmux */
 export declare function passthroughTmux(sequence: string): void
 
+/**
+ * Pins a GPU shared texture's plane (a dmabuf from
+ * `webPreferences.offscreen.useSharedTexture`) and returns a handle for
+ * `ShmGraphicBuffer::write_texture`.
+ *
+ * Costs ~0.2ms, against ~20ms for the read it enables, so the caller can
+ * release the Electron texture immediately afterwards. The fd is dup'd, so the
+ * allocation outlives Electron dropping its own reference; `unpin_texture`
+ * drops it. `stride` is the row stride in bytes, GPU-aligned and therefore
+ * larger than `width * 4`.
+ */
+export declare function pinTexture(fd: number, width: number, height: number, stride: number, offset: number, size: number): number
+
 export interface SupportedFeatures {
   keyboard: boolean
   images: boolean
@@ -109,6 +136,12 @@ export declare function tmuxPassthrough(buffer: string): string
 
 /** Returns the CSI sequence for the requested tmux extended-keys mode */
 export declare function tmuxSetExtendedKeysMode(mode: string): string
+
+/**
+ * Unmap a pinned texture without reading it. Safe with a stale or already
+ * consumed id, so callers can unpin unconditionally on the error path.
+ */
+export declare function unpinTexture(id: number): void
 
 export interface WindowSize {
   cols: number
