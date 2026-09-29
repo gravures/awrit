@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { ShmGraphicBuffer } from 'awrit-native-rs';
-import { paintImage, paintInitialFrame } from './kittyGraphics';
+import { gfxAck, gfxInFlight, paintImage, paintInitialFrame } from './kittyGraphics';
+import { flushBucket, __setPerfEnabledForTest } from '../perf';
 
 function buffer(): ShmGraphicBuffer {
   return { nameBase64: 'AAAA', write: () => {}, writeEmpty: () => {} } as unknown as ShmGraphicBuffer;
@@ -55,4 +56,50 @@ test('the cursor is moved with 1-based CUP rows and columns', () => {
     ),
   );
   expect(out).toContain('[6;4H');
+});
+
+// The send→ack gauge is what distinguishes "we render slowly" from "the
+// terminal is behind us". If unacked frames do not accumulate, the terminal is
+// keeping pace and the lag lives in our own pipeline; if they do, no amount of
+// producer tuning will drain the backlog.
+//
+// Regression guard: the display path reuses one image id forever, so an earlier
+// per-id map could only ever hold one entry and its count drifted upward by
+// (sends - acks) even when the terminal answered every frame on time.
+test('unacked frames accumulate, then drain as the terminal acknowledges', () => {
+  __setPerfEnabledForTest(true);
+  try {
+    const place = () =>
+      capture(() =>
+        paintImage(
+          buffer(),
+          { width: 978, height: 546 },
+          { x: { cell: 0, px: 0 }, y: { cell: 0, px: 0 } },
+          { cols: 103, rows: 26 },
+        ),
+      );
+    const before = gfxInFlight();
+    for (let i = 0; i < 5; i++) place();
+    expect(gfxInFlight()).toBe(before + 5);
+
+    // Five acks, five drains — the gauge must land back on its starting value.
+    for (let i = 0; i < 5; i++) gfxAck();
+    expect(gfxInFlight()).toBe(before);
+    expect(flushBucket()).toContain('gfx.roundtrip');
+  } finally {
+    __setPerfEnabledForTest(false);
+  }
+});
+
+// An ack with nothing outstanding must not invent a drain or a negative gauge.
+test('an unmatched ack does not fabricate a drain', () => {
+  __setPerfEnabledForTest(true);
+  try {
+    const before = gfxInFlight();
+    gfxAck();
+    gfxAck();
+    expect(gfxInFlight()).toBe(before);
+  } finally {
+    __setPerfEnabledForTest(false);
+  }
 });
