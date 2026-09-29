@@ -40,6 +40,48 @@ pub fn bgra_to_rgba(src: &[u8], dst: &mut [u8]) -> bool {
   return true;
 }
 
+/// BGRA→RGBA from a *strided* source into a tightly packed destination.
+///
+/// Needed for GPU shared textures (06-06): a dmabuf plane's row stride is
+/// padded for GPU alignment (measured 3328 bytes for a 790px-wide frame, i.e.
+/// 42px of padding per row) and a plain whole-buffer copy would shear the image.
+/// Each row is contiguous, so the existing per-chunk SIMD kernel is reused
+/// as-is; only the row stepping differs.
+///
+/// `swap` selects the channel order: true for BGRA (the usual case on Linux),
+/// false for an already-RGBA source, which then only needs the de-stride copy.
+#[inline]
+pub fn bgra_to_rgba_strided(
+  src: &[u8],
+  dst: &mut [u8],
+  width: u32,
+  height: u32,
+  src_stride: usize,
+  swap: bool,
+) -> bool {
+  let row_bytes = width as usize * BYTES_PER_PIXEL;
+  if src.len() < src_stride * (height as usize - 1) + row_bytes {
+    return false;
+  }
+  if dst.len() < row_bytes * height as usize {
+    return false;
+  }
+
+  for y in 0..height as usize {
+    let src_row = &src[y * src_stride..y * src_stride + row_bytes];
+    let dst_row = &mut dst[y * row_bytes..(y + 1) * row_bytes];
+    if swap {
+      unsafe {
+        bgra_to_rgba_chunk(src_row, dst_row);
+      }
+    } else {
+      dst_row.copy_from_slice(src_row);
+    }
+  }
+
+  true
+}
+
 #[inline]
 pub fn bgra_to_rgba_rect(src: &[u8], dst: &mut [u8], image_width: u32, src_rect: Rect) -> bool {
   // Validate input dimensions
@@ -480,5 +522,56 @@ mod tests {
     assert_eq!(dst[13], 42); // G
     assert_eq!(dst[14], 41); // B
     assert_eq!(dst[15], 44); // A
+  }
+
+  /// A padded row stride (the dmabuf case) must not leak the padding into the
+  /// output, and the second row must land at dst offset 0, not at the stride.
+  #[test]
+  fn test_bgra_to_rgba_strided_skips_padding() {
+    const WIDTH: u32 = 2;
+    const HEIGHT: u32 = 2;
+    const STRIDE: usize = 16; // 8 bytes of real pixels + 8 of padding
+
+    let mut src = [0u8; STRIDE * HEIGHT as usize];
+    // row 0: two BGRA pixels, then junk padding that must not be copied
+    src[0..8].copy_from_slice(&[255, 128, 64, 255, 100, 150, 200, 255]);
+    src[8..16].copy_from_slice(&[0xAB; 8]);
+    // row 1
+    src[16..24].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+    src[24..32].copy_from_slice(&[0xCD; 8]);
+
+    let mut dst = [0u8; 16];
+    assert!(bgra_to_rgba_strided(&src, &mut dst, WIDTH, HEIGHT, STRIDE, true));
+
+    // row 0 swapped, packed at offset 0
+    assert_eq!(&dst[0..4], &[64, 128, 255, 255]);
+    assert_eq!(&dst[4..8], &[200, 150, 100, 255]);
+    // row 1 packed immediately after row 0, not at src stride
+    assert_eq!(&dst[8..12], &[3, 2, 1, 4]);
+    assert_eq!(&dst[12..16], &[7, 6, 5, 8]);
+  }
+
+  /// `swap: false` must pass the pixels through untouched while still dropping
+  /// the row padding.
+  #[test]
+  fn test_bgra_to_rgba_strided_passthrough() {
+    const STRIDE: usize = 12;
+    let mut src = [0u8; STRIDE * 2];
+    src[0..8].copy_from_slice(&[9, 8, 7, 6, 5, 4, 3, 2]);
+    src[12..20 - 4].copy_from_slice(&[1, 1, 1, 1]);
+
+    let mut dst = [0u8; 16];
+    assert!(bgra_to_rgba_strided(&src, &mut dst, 2, 2, STRIDE, false));
+    assert_eq!(&dst[0..8], &[9, 8, 7, 6, 5, 4, 3, 2]);
+    assert_eq!(&dst[8..16], &[1, 1, 1, 1, 0, 0, 0, 0]);
+  }
+
+  /// Undersized input must be refused rather than read out of bounds.
+  #[test]
+  fn test_bgra_to_rgba_strided_rejects_short_input() {
+    let src = [0u8; 16];
+    let mut dst = [0u8; 16];
+    assert!(!bgra_to_rgba_strided(&src, &mut dst, 2, 4, 16, true));
+    assert!(!bgra_to_rgba_strided(&src, &mut dst, 2, 2, 16, true));
   }
 }
