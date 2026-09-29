@@ -257,21 +257,45 @@ pub(crate) fn parse_apc(buffer: &[u8]) -> io::Result<Option<InternalEvent>> {
             return Ok(None);
         }
         let content_str = String::from_utf8_lossy(&content[1..]).into_owned();
-        let parts: Vec<&str> = content_str.split(';').collect();
-        let (graphics_data, status) = if parts.len() == 2 {
-            (parts[0].to_string(), parts[1])
-        } else {
-            (content_str, "")
+        // A status may arrive either as one of the comma-separated control
+        // keys ("i=1,OK") or after a ';' ("i=1,s=1;OK"). Accept both shapes:
+        // each is used in practice, and parsing only one makes the other read
+        // as an error.
+        let (control, payload) = match content_str.split_once(';') {
+            Some((c, p)) => (c, Some(p)),
+            None => (content_str.as_str(), None),
         };
+        let mut id = String::new();
+        let mut status = String::new();
+        for pair in control.split(',') {
+            if let Some(v) = pair.strip_prefix("i=") {
+                id = v.to_string();
+            } else if pair == "OK" {
+                status = "OK".to_string();
+            } else if let Some(v) = pair.strip_prefix("ENOENT:") {
+                status = format!("ENOENT:{}", v);
+            }
+        }
+        if status.is_empty() {
+            if let Some("OK") = payload {
+                status = "OK".to_string();
+            } else if let Some(p) = payload {
+                if let Some(msg) = p.strip_prefix("ENOENT:") {
+                    status = format!("ENOENT:{}", msg);
+                } else {
+                    status = p.to_string();
+                }
+            }
+        }
         let result = if status == "OK" {
             KittyGraphicsOkOrError::Ok
+        } else if status.is_empty() {
+            // Not a response (e.g. a command echoed back); no status to report.
+            KittyGraphicsOkOrError::Error(String::new())
         } else {
-            KittyGraphicsOkOrError::Error(status.to_string())
+            KittyGraphicsOkOrError::Error(status)
         };
-        return Ok(Some(InternalEvent::Event(Event::KittyGraphics(
-            graphics_data,
-            result,
-        ))));
+        return Ok(Some(InternalEvent::Event(Event::KittyGraphics(id, result))));
     }
 
     let content_str = String::from_utf8_lossy(content).into_owned();
@@ -1002,6 +1026,68 @@ mod tests {
     use crate::event::{KeyEventState, KeyModifiers, MouseButton, MouseEvent};
 
     use super::*;
+
+    // A response that carries no payload: the control data is "i=<id>,OK",
+    // comma-separated with no ';'. Splitting on ';' alone treated the whole
+    // thing as an unrecognised payload, so a terminal that acknowledged every
+    // command reported no status at all.
+    #[test]
+    fn kitty_display_ack_has_no_payload() {
+        assert_eq!(
+            parse_apc(b"\x1B_Gi=42,OK\x1B\\").unwrap(),
+            Some(InternalEvent::Event(Event::KittyGraphics(
+                "42".to_string(),
+                KittyGraphicsOkOrError::Ok,
+            ))),
+        );
+    }
+
+    #[test]
+    fn kitty_error_ack_reports_the_message() {
+        assert_eq!(
+            parse_apc(b"\x1B_Gi=7,ENOENT:no such image\x1B\\").unwrap(),
+            Some(InternalEvent::Event(Event::KittyGraphics(
+                "7".to_string(),
+                KittyGraphicsOkOrError::Error("ENOENT:no such image".to_string()),
+            ))),
+        );
+    }
+
+    #[test]
+    fn kitty_response_with_payload_keeps_the_status() {
+        assert_eq!(
+            parse_apc(b"\x1B_Gi=9,OK;payload\x1B\\").unwrap(),
+            Some(InternalEvent::Event(Event::KittyGraphics(
+                "9".to_string(),
+                KittyGraphicsOkOrError::Ok,
+            ))),
+        );
+    }
+
+    // A status after a ';' must parse as well, not only a comma-separated
+    // control key: terminal/sys/unix.rs detects graphics support by reading
+    // this status, and reading only the other shape reports no support.
+    #[test]
+    fn kitty_semicolon_status_is_recognised() {
+        assert_eq!(
+            parse_apc(b"\x1B_Gi=4294111295,s=1,v=1;OK\x1B\\").unwrap(),
+            Some(InternalEvent::Event(Event::KittyGraphics(
+                "4294111295".to_string(),
+                KittyGraphicsOkOrError::Ok,
+            ))),
+        );
+    }
+
+    #[test]
+    fn kitty_semicolon_error_is_recognised() {
+        assert_eq!(
+            parse_apc(b"\x1B_Gi=5;ENOENT:no such image\x1B\\").unwrap(),
+            Some(InternalEvent::Event(Event::KittyGraphics(
+                "5".to_string(),
+                KittyGraphicsOkOrError::Error("ENOENT:no such image".to_string()),
+            ))),
+        );
+    }
 
     #[test]
     fn test_esc_key() {
