@@ -1,6 +1,7 @@
 import { GFX } from './escapeCodes';
 import type { Rect, Size } from './graphics';
 import { options } from '../args';
+import { perfEnd, perfTime } from '../perf';
 import type { ShmGraphicBuffer } from 'awrit-native-rs';
 import { placeCursor } from './output';
 import { isTmuxSession } from './tmux';
@@ -154,10 +155,15 @@ export function paintImage(
     buffer,
     free: () => freeImage(id),
     replace: (buffer_) => {
+      // Split so the next perf run says whether paint.replace is our native
+      // write (bench: ~5ms/2.5MB) or the synchronous TTY escape writes.
+      const tWrite = perfTime();
       buffer.write(buffer_, size.width);
-      // freeImage(id);
+      perfEnd('paint.replace.write', tWrite);
+      const tOut = perfTime();
       placeCursor({ x: position.x.cell, y: position.y.cell });
       paintBitmap(buffer.nameBase64, size, control);
+      perfEnd('paint.replace.stdout', tOut);
     },
   };
 }
