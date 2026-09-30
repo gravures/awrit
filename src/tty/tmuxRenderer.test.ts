@@ -87,7 +87,17 @@ describe('TmuxRenderer', () => {
     const renderer = new TmuxRenderer(() => paneState(status)) as any;
     renderer.outputFd = fd;
 
-    await renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
+    await renderer.renderPixels(
+      () => ({ nameBase64: 'x', width: 1, height: 1 }),
+      4,
+      77,
+      1,
+      1,
+      0,
+      0,
+      { cols: 10, rows: 10 },
+      7,
+    );
 
     expect(readFileSync(outputPath, 'utf8')).toBe('');
     expect(renderer.pendingBySlot.get(7)?.imageId).toBe(77);
@@ -113,7 +123,17 @@ describe('TmuxRenderer', () => {
 
     const renderer = new TmuxRenderer(() => paneState(status)) as any;
     renderer.outputFd = fd;
-    await renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
+    await renderer.renderPixels(
+      () => ({ nameBase64: 'x', width: 1, height: 1 }),
+      4,
+      77,
+      1,
+      1,
+      0,
+      0,
+      { cols: 10, rows: 10 },
+      7,
+    );
 
     status = 'invisible';
     await renderer.checkVisibilityAndFlush();
@@ -135,7 +155,17 @@ describe('TmuxRenderer', () => {
 
     const renderer = new TmuxRenderer(() => paneState('active')) as any;
     renderer.outputFd = fd;
-    await renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
+    await renderer.renderPixels(
+      () => ({ nameBase64: 'x', width: 1, height: 1 }),
+      4,
+      77,
+      1,
+      1,
+      0,
+      0,
+      { cols: 10, rows: 10 },
+      7,
+    );
 
     // The pane may have become hidden and visible again before this poll. A
     // retained replay makes that active -> active race lossless.
@@ -161,7 +191,17 @@ describe('TmuxRenderer', () => {
     }) as any;
     renderer.outputFd = fd;
 
-    await renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
+    await renderer.renderPixels(
+      () => ({ nameBase64: 'x', width: 1, height: 1 }),
+      4,
+      77,
+      1,
+      1,
+      0,
+      0,
+      { cols: 10, rows: 10 },
+      7,
+    );
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
@@ -180,7 +220,17 @@ describe('TmuxRenderer', () => {
     renderer.outputFd = -1;
 
     await expect(
-      renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7),
+      renderer.renderPixels(
+        () => ({ nameBase64: 'x', width: 1, height: 1 }),
+        4,
+        77,
+        1,
+        1,
+        0,
+        0,
+        { cols: 10, rows: 10 },
+        7,
+      ),
     ).rejects.toThrow();
     expect(renderer.pendingBySlot.get(7)?.imageId).toBe(77);
     expect(renderer.displayedImageBySlot.has(7)).toBe(false);
@@ -202,11 +252,31 @@ describe('TmuxRenderer', () => {
 
     const renderer = new TmuxRenderer(() => paneState('active')) as any;
     renderer.outputFd = fd;
-    await renderer.renderPng(Buffer.from([1]), 50, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
+    await renderer.renderPixels(
+      () => ({ nameBase64: 'x', width: 1, height: 1 }),
+      4,
+      50,
+      1,
+      1,
+      0,
+      0,
+      { cols: 10, rows: 10 },
+      7,
+    );
 
     renderer.outputFd = -1;
     await expect(
-      renderer.renderPng(Buffer.from([2]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7),
+      renderer.renderPixels(
+        () => ({ nameBase64: 'x', width: 1, height: 1 }),
+        4,
+        77,
+        1,
+        1,
+        0,
+        0,
+        { cols: 10, rows: 10 },
+        7,
+      ),
     ).rejects.toThrow();
     expect(renderer.displayedImageBySlot.get(7)).toBe(50);
     expect(renderer.pendingBySlot.get(7)?.imageId).toBe(77);
@@ -230,7 +300,17 @@ describe('TmuxRenderer', () => {
 
     const renderer = new TmuxRenderer(() => paneState('active', viewers)) as any;
     renderer.outputFd = fd;
-    await renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
+    await renderer.renderPixels(
+      () => ({ nameBase64: 'x', width: 1, height: 1 }),
+      4,
+      77,
+      1,
+      1,
+      0,
+      0,
+      { cols: 10, rows: 10 },
+      7,
+    );
     await renderer.checkVisibilityAndFlush();
 
     expect(renderer.visibilityTimer).not.toBeNull();
@@ -240,6 +320,38 @@ describe('TmuxRenderer', () => {
     const output = readFileSync(outputPath, 'utf8');
     expect(output.match(/a=t,i=77/g)?.length).toBe(3);
     renderer.close();
+  });
+
+  test('prepares shared memory at flush time, so a retained frame refills its segment', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'awrit-tmux-renderer-'));
+    tempDirs.push(dir);
+    const outputPath = join(dir, 'out.txt');
+    const fd = openSync(outputPath, 'w');
+    openedFds.push(fd);
+    let status: TmuxPaneStatus = 'invisible';
+
+    const renderer = new TmuxRenderer(() => paneState(status)) as any;
+    renderer.outputFd = fd;
+
+    // The terminal unlinks a segment once it has read it, so a frame retained
+    // while the pane is hidden has to be able to put its pixels back. A
+    // one-shot prepare would emit a name for a segment nobody can read on the
+    // replay. Observed as black frames / tearing before the ring existed.
+    let fills = 0;
+    const prepare = () => {
+      fills++;
+      return { nameBase64: `seg${fills}`, width: 1, height: 1 };
+    };
+
+    await renderer.renderPixels(prepare, 4, 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
+    expect(fills).toBe(0); // hidden pane: nothing is filled, and nothing is lost
+
+    status = 'active';
+    await renderer.checkVisibilityAndFlush();
+    expect(fills).toBe(1);
+    // nameBase64 is passed through verbatim: the real producer is Rust's
+    // nameBase64 getter, not JS base64 of a name.
+    expect(readFileSync(outputPath, 'utf8')).toContain('q=2;seg1');
   });
 
   test('retries the newest repaint received during an output failure', async () => {
@@ -252,10 +364,30 @@ describe('TmuxRenderer', () => {
     const renderer = new TmuxRenderer(() => paneState('active')) as any;
     renderer.outputFd = -1;
     await expect(
-      renderer.renderPng(Buffer.from([1]), 77, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7),
+      renderer.renderPixels(
+        () => ({ nameBase64: 'x', width: 1, height: 1 }),
+        4,
+        77,
+        1,
+        1,
+        0,
+        0,
+        { cols: 10, rows: 10 },
+        7,
+      ),
     ).rejects.toThrow();
 
-    await renderer.renderPng(Buffer.from([2]), 88, 1, 1, 0, 0, { cols: 10, rows: 10 }, 7);
+    await renderer.renderPixels(
+      () => ({ nameBase64: 'x', width: 1, height: 1 }),
+      4,
+      88,
+      1,
+      1,
+      0,
+      0,
+      { cols: 10, rows: 10 },
+      7,
+    );
     expect(renderer.latestBySlot.get(7)?.imageId).toBe(88);
     expect(renderer.pendingBySlot.get(7)?.imageId).toBe(88);
 

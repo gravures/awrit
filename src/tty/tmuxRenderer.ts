@@ -3,7 +3,7 @@ import { options } from '../args';
 import {
   buildTmuxDeleteImageCommand,
   buildTmuxPlaceholderLines,
-  buildTmuxUploadCommands,
+  buildTmuxShmUploadCommands,
 } from './tmuxProtocol';
 import { getPaneState, type TmuxPaneState } from './tmux';
 import { perfEnd, perfTime, perfValue } from '../perf';
@@ -13,9 +13,23 @@ type PaneBounds = {
   rows: number;
 };
 
+/**
+ * Shared-memory media, resolved at flush time rather than up front.
+ *
+ * The terminal unlinks the shm segment once it has read it, so a retained
+ * request cannot just remember a name — it has to be able to put the pixels
+ * back. `prepare` refills the segment and returns the name to reference.
+ */
+type ShmMedia = {
+  nameBase64: string;
+  width: number;
+  height: number;
+};
+
 type RenderRequest = {
   slotId: number;
-  pngBuffer: Buffer;
+  prepare: () => ShmMedia;
+  rasterBytes: number;
   imageId: number;
   cols: number;
   rows: number;
@@ -203,16 +217,23 @@ export class TmuxRenderer {
 
       const assembleStart = perfTime();
       let output = SYNC_BEGIN;
+      let placeholderBytes = 0;
       for (const request of batch) {
         // ponytail: standing delivery sub-timers. Added by 06-04 Task 3 to find
         // the bottleneck; kept because they are free when AWRIT_PERF is off and
         // they are what proved delivery is terminal-bound, not ours.
         let t = perfTime();
-        const { upload: uploadCommands, placement } = buildTmuxUploadCommands(
-          request.pngBuffer,
+        const media = request.prepare();
+        perfEnd('deliver.shm', t);
+
+        t = perfTime();
+        const { upload: uploadCommands, placement } = buildTmuxShmUploadCommands(
+          media.nameBase64,
           request.imageId,
           request.cols,
           request.rows,
+          media.width,
+          media.height,
         );
         perfEnd('deliver.upload', t);
 
@@ -226,6 +247,9 @@ export class TmuxRenderer {
           request.pane,
         );
         perfEnd('deliver.placeholders', t);
+        // Measured, not estimated: the placeholder grid is the bulk of the
+        // bytes on the wire (deliver.write blocks on the pty while this grows).
+        placeholderBytes += placeholderLines.reduce((n, l) => n + Buffer.byteLength(l), 0);
 
         for (const wrapped of uploadCommands) {
           output += wrapped;
@@ -257,10 +281,14 @@ export class TmuxRenderer {
       }
       output += SYNC_END;
       perfEnd('deliver.assemble', assembleStart);
+      // Wire bytes, so the real cost is a measurement rather than an estimate.
+      // The raster is what the shm segment holds; it never crosses the wire.
       perfValue(
-        'deliver.pngKB',
-        Math.round(batch.reduce((n, r) => n + r.pngBuffer.length, 0) / 1024),
+        'deliver.rasterKB',
+        Math.round(batch.reduce((n, r) => n + r.rasterBytes, 0) / 1024),
       );
+      perfValue('deliver.wireKB', Math.round(Buffer.byteLength(output) / 1024));
+      perfValue('deliver.placeholderKB', Math.round(placeholderBytes / 1024));
       const writeStart = perfTime();
       try {
         writeAll(this.outputFd, output);
@@ -280,8 +308,16 @@ export class TmuxRenderer {
     }
   }
 
-  renderPng(
-    pngBuffer: Buffer,
+  /**
+   * Queue one frame for a slot, delivered as shared memory.
+   *
+   * `prepare` is called at flush time, not here: the terminal unlinks the shm
+   * segment after reading it, so a retained frame has to be able to refill it
+   * before a re-send (invisible pane, newly attached client).
+   */
+  renderPixels(
+    prepare: () => ShmMedia,
+    rasterBytes: number,
     imageId: number,
     cols: number,
     rows: number,
@@ -293,7 +329,8 @@ export class TmuxRenderer {
     if (this.closed) return Promise.resolve();
     const request = {
       slotId,
-      pngBuffer,
+      prepare,
+      rasterBytes,
       imageId,
       cols,
       rows,
