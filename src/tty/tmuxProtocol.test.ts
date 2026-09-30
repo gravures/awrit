@@ -157,6 +157,27 @@ describe('tmuxProtocol', () => {
     expect(placeholderCount).toBe(6);
   });
 
+  test('omits inherited diacritics after the first cell of each row', () => {
+    // Diacritics are inherited from the cell to the left, so a run of
+    // placeholders needs them only on its first cell. Placeholder bytes are the
+    // whole wire cost of this path (deliver.placeholderKB == deliver.wireKB),
+    // so re-adding them per cell is a 2.5x regression, not a style choice.
+    const [line] = buildTmuxPlaceholderLines(0x123456, 0, 0, 8, 1, { cols: 8, rows: 1 });
+    // U+0305 is the row-0/col-0 diacritic (COMBINING OVERLINE); the SGR and
+    // cursor sequences around it are ASCII, so this counts only real marks.
+    const diacriticCount = (s: string) => [...s].filter((c) => c === '\u0305').length;
+
+    // One placeholder per cell either way -- the layout is what changed.
+    expect([...line].filter((c) => c === TMUX_IMAGE_PLACEHOLDER).length).toBe(8);
+
+    // row + col on the first cell only (msb is 0 for this id), nothing after.
+    expect(diacriticCount(line)).toBe(2);
+
+    // What the same 8 cells cost with per-cell diacritics: 8 x (row + col).
+    const naive = 8 * (4 + 2 + 2) + 20;
+    expect(Buffer.byteLength(line)).toBeLessThan(naive);
+  });
+
   test('checks placeholder limits after clipping to pane bounds', () => {
     const lines = buildTmuxPlaceholderLines(0x123456, 0, 0, 500, 500, {
       cols: 5,
