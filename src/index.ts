@@ -211,6 +211,19 @@ app.commandLine.appendSwitch('silent-debugger-extension-api');
 // Prevent sysctlbyname crash: https://github.com/electron/electron/issues/45653#issuecomment-2663510200
 app.commandLine.appendSwitch('disable-features', 'UseBrowserCalculatedOrigin');
 
+// Disable Blink's compositor smooth scrolling.
+//
+// `buildWheelEvent` sets `hasPreciseScrollingDeltas: true`, which only selects
+// pixel units over line units -- it does NOT stop the compositor animator. The
+// 06-06 note claiming otherwise was wrong, so the animator has been running the
+// whole time. It queues wheel deltas and animates toward them, which is what
+// produces the lag that accumulates, the jump-then-ease, and the direction
+// reversal when queued deltas from a previous gesture are animated after the
+// direction has changed. The animator also keeps requesting frames, so each
+// animation step re-sends the full tmux placeholder grid (see
+// buildTmuxPlaceholderLines) -- that is where most of the per-frame bytes go.
+app.commandLine.appendSwitch('disable-smooth-scrolling');
+
 app.whenReady().then(async () => {
   const window = await createWindowWithToolbar(getWindowSize(), INITIAL_URL);
 

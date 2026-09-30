@@ -78,9 +78,15 @@ export function buildWheelEvent(
     x,
     y,
     accelerationRatioY: 0.5,
-    // Precise pixels: Blink applies the delta directly instead of routing it
-    // through line-scroll + smooth animation (which queued ticks behind a
-    // dead-looking void, then jumped and eased out — 06-06 checkpoint 2).
+    // Precise pixels: wheelTicks are sent as pixel deltas rather than lines.
+    //
+    // This does NOT disable smooth scrolling by itself -- that needed
+    // `--disable-smooth-scrolling` in index.ts. It only makes each event
+    // pixel-denominated, so combined with the switch the delta is applied once,
+    // immediately, instead of being queued and eased by the compositor
+    // animator (which accumulated lag and could animate a queued delta after
+    // the scroll direction had already reversed). 06-06 checkpoint 2 credited
+    // this flag with disabling the animation; it does not.
     hasPreciseScrollingDeltas: true,
     canScroll: true,
   };
