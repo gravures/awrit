@@ -28,6 +28,16 @@ import { getPaneSize, isTmuxSession } from './tty/tmux';
 import { FrameCoalescer } from './tty/frameCoalescer';
 import { TmuxRenderer } from './tty/tmuxRenderer';
 
+/** Shared-texture paint path gate (06-06). Default on; config.js can disable. */
+let sharedTextureEnabled = true;
+export function setSharedTexture(value: unknown): void {
+  const v = typeof value === 'boolean' ? value : true;
+  sharedTextureEnabled = v;
+}
+export function getSharedTexture(): boolean {
+  return sharedTextureEnabled;
+}
+
 /** Everything needed to encode and place one frame, captured at paint time. */
 type PaintJob = {
   image: NativeImage;
@@ -523,7 +533,7 @@ export function registerPaintedContentFallback(
       // faster than the shm capture, which is capped at 5-10 paints/s while the
       // renderer runs at 60 (see .paul/codebase/ARCHITECTURE.md).
       const texture = event?.texture;
-      if (texture) {
+      if (texture && getSharedTexture()) {
         paintTexture(texture);
         return;
       }

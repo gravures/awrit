@@ -17,7 +17,7 @@ import { loadKeyBindings } from './keybindings';
 import { getForcedTmuxMouseCoordinateMode } from './tty/mouseCoordinates';
 import fs from 'node:fs';
 import path from 'node:path';
-import { closeTmuxRenderer } from './paint';
+import { closeTmuxRenderer, setSharedTexture } from './paint';
 import { setRasterScale } from './raster';
 import { getAllowPassthrough, getTmuxVersion, isTmuxSession, mouseEnabled } from './tty/tmux';
 
@@ -32,9 +32,10 @@ try {
 
 let homepage = 'https://github.com/chase/awrit';
 
-function loadConfig(config: typeof import('../config.js')) {
+function loadConfig(config: typeof import('../config.js') & { sharedTexture?: boolean }) {
   if (config.homepage) homepage = config.homepage;
   if (config.rasterScale != null) setRasterScale(config.rasterScale);
+  if (config.sharedTexture != null) setSharedTexture(config.sharedTexture);
   if (config.keybindings) {
     if (process.platform === 'darwin') {
       Object.assign(config.keybindings, config.keybindings.mac);

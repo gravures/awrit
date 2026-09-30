@@ -14,6 +14,15 @@ const homepage = 'https://github.com/chase/awrit';
  **/
 const rasterScale = 2;
 
+/** Shared-texture paint path (06-06)
+ *
+ * When enabled, uses GPU shared-texture path for the fallback renderer
+ * (Ghostty outside tmux). Removes the CPU NativeImage read (~20ms) but
+ * is not measurably faster in sustained throughput (~6 tex/s vs 5-10 paints/s).
+ * Gateable for comparison/revert.
+ **/
+const sharedTexture = true;
+
 /** Keybindings
  *
  * @typedef {import('./src/keybindings').KeyBindingAction} KeyBindingAction
@@ -401,6 +410,7 @@ const config = {
   homepage,
   rasterScale,
   keybindings,
+  sharedTexture,
 };
 
 module.exports = config;
