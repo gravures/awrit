@@ -111,9 +111,15 @@ export function buildTmuxPlaceholderLines(
     let line = '';
     line += `\x1b[${startRow + row + 1};${startCol + 1}H`;
     line += `\x1b[38:2:${r}:${g}:${b}m`;
-    const rowMark = diacritic(row);
-    for (let col = 0; col < visibleCols; col++) {
-      line += TMUX_IMAGE_PLACEHOLDER + rowMark + diacritic(col) + msbMark;
+    // Diacritics are inherited from the placeholder cell to the left, so only
+    // the first cell of a row needs them. A bare run of placeholders then
+    // advances the column by one per cell automatically. This is the entire
+    // wire cost of the tmux path -- measured at deliver.placeholderKB=32, i.e.
+    // all of deliver.wireKB -- so dropping the repeats is the difference
+    // between 2.5x the bytes and 1x.
+    line += TMUX_IMAGE_PLACEHOLDER + diacritic(row) + diacritic(0) + msbMark;
+    for (let col = 1; col < visibleCols; col++) {
+      line += TMUX_IMAGE_PLACEHOLDER;
     }
     line += '\x1b[39m';
     lines.push(line);
