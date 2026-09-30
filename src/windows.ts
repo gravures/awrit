@@ -254,7 +254,7 @@ export async function createWindowWithToolbar(
     }, 200);
   };
 
-  let popupActive = false;
+  const popupActive = false;
 
   const stopSuppression = (delay = 300, force = false) => {
     if (popupActive) return; // Never unsuppress while popup is displayed
