@@ -13,6 +13,7 @@ use nix::unistd::{dup, ftruncate};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::os::fd::{AsFd, FromRawFd, OwnedFd};
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -155,6 +156,9 @@ pub fn unpin_texture(id: u32) {
 pub struct ShmGraphicBuffer {
   name: String,
   size: u32,
+  /// Cached mapping to avoid per-frame mmap/munmap page-fault cost.
+  /// (fd, ptr, len)
+  cached: Mutex<Option<(OwnedFd, NonNull<u8>, usize)>>,
   /// Last `write_texture` split, in ms: (shm open+truncate+map, convert, unmap).
   /// Read by `timings` so the JS perf log can attribute the per-frame cost.
   timings: Mutex<(f64, f64, f64)>,
@@ -162,6 +166,14 @@ pub struct ShmGraphicBuffer {
 
 impl ObjectFinalize for ShmGraphicBuffer {
   fn finalize(self, mut _env: Env) -> Result<()> {
+    // Clean up cached mapping if present
+    if let Ok(mut guard) = self.cached.lock() {
+      if let Some((_fd, ptr, len)) = guard.take() {
+        unsafe {
+          let _ = munmap(ptr.cast::<std::ffi::c_void>(), len);
+        }
+      }
+    }
     // Attempt to unlink the shared memory, doesn't really matter if it fails
     let _ = shm_unlink(self.name());
     Ok(())
@@ -178,7 +190,6 @@ impl ShmGraphicBuffer {
       .unwrap()
       .as_nanos();
 
-    // Convert timestamp to hex, keeping the least significant (most unique) digits
     let hex = format!("{:x}", timestamp);
     let significant_part = if hex.len() > 23 {
       &hex[hex.len() - 23..]
@@ -190,6 +201,7 @@ impl ShmGraphicBuffer {
     Self {
       name,
       size,
+      cached: Mutex::new(None),
       timings: std::sync::Mutex::new((0.0, 0.0, 0.0)),
     }
   }
@@ -392,34 +404,53 @@ impl ShmGraphicBuffer {
       ));
     }
 
+    // Acquire or create cached mapping
+    let (dst_ptr, dst_len, map_time_ms) = {
+      let mut cached = self.cached.lock().map_err(|_| napi::Error::from_reason("cached mutex poisoned"))?;
+      if let Some((_fd, ptr, len)) = cached.as_ref() {
+        // Reuse existing mapping
+        let t0 = std::time::Instant::now();
+        let _ = t0; // map_time_ms ~0
+        (*ptr, *len, 0.0)
+      } else {
+        // First time: create shm object and map
+        let t0 = std::time::Instant::now();
+        let shm_fd = shm_open(
+          self.name(),
+          OFlag::O_CREAT | OFlag::O_RDWR,
+          Mode::S_IRUSR | Mode::S_IWUSR,
+        )
+        .map_err(|e| napi::Error::from_reason(format!("Failed to open shared memory: {}", e)))?;
+
+        ftruncate(&shm_fd, self.size as i64).map_err(|e| {
+          napi::Error::from_reason(format!("Failed to truncate shared memory: {}", e))
+        })?;
+
+        let dst_size = NonZeroUsize::new(self.size as usize)
+          .ok_or_else(|| napi::Error::from_reason("Size must be non-zero"))?;
+
+        let raw_ptr = unsafe {
+          mmap(
+            None,
+            dst_size,
+            ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
+            MapFlags::MAP_SHARED,
+            shm_fd.as_fd(),
+            0,
+          )
+          .map_err(|e| napi::Error::from_reason(format!("Failed to mmap shared memory: {}", e)))?
+        };
+        let map_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        // mmap returns NonNull<c_void>; cast to NonNull<u8> for cached storage
+        let dst_ptr = raw_ptr.cast::<u8>();
+        // Store fd and ptr for reuse
+        *cached = Some((shm_fd, dst_ptr, dst_size.get()));
+        (dst_ptr, dst_size.get(), map_ms)
+      }
+    };
+
     let result = (|| -> napi::Result<()> {
       let t0 = std::time::Instant::now();
-      let shm_fd = shm_open(
-        self.name(),
-        OFlag::O_CREAT | OFlag::O_RDWR,
-        Mode::S_IRUSR | Mode::S_IWUSR,
-      )
-      .map_err(|e| napi::Error::from_reason(format!("Failed to open shared memory: {}", e)))?;
-
-      ftruncate(&shm_fd, self.size as i64).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to truncate shared memory: {}", e))
-      })?;
-
-      let dst_size = NonZeroUsize::new(self.size as usize)
-        .ok_or_else(|| napi::Error::from_reason("Size must be non-zero"))?;
-
-      let dst_ptr = unsafe {
-        mmap(
-          None,
-          dst_size,
-          ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
-          MapFlags::MAP_SHARED,
-          shm_fd,
-          0,
-        )
-        .map_err(|e| napi::Error::from_reason(format!("Failed to mmap shared memory: {}", e)))?
-      };
-      let t1 = t0.elapsed().as_secs_f64() * 1000.0;
 
       let src_slice = unsafe {
         std::slice::from_raw_parts(
@@ -428,11 +459,8 @@ impl ShmGraphicBuffer {
         )
       };
       let dst_slice =
-        unsafe { std::slice::from_raw_parts_mut(dst_ptr.as_ptr() as *mut u8, self.size as usize) };
+        unsafe { std::slice::from_raw_parts_mut(dst_ptr.as_ptr() as *mut u8, dst_len) };
 
-      // Touch the source once before timing: the first load of a GPU dmabuf
-      // page faults in over the PCIe BAR, and we want that cost inside the copy
-      // number rather than attributed to the mmap above.
       let converted = bgra_to_rgba::bgra_to_rgba_strided(
         src_slice,
         dst_slice,
@@ -443,20 +471,13 @@ impl ShmGraphicBuffer {
       );
       let t2 = t0.elapsed().as_secs_f64() * 1000.0;
 
-      // Unmap before reporting, so a failed frame cannot leak a mapping per
-      // paint — the only fallible step below is the conversion itself.
-      unsafe {
-        munmap(dst_ptr, dst_size.get()).map_err(|e| {
-          napi::Error::from_reason(format!("Failed to munmap shared memory: {}", e))
-        })?;
-      }
       if !converted {
         return Err(napi::Error::from_reason(
           "Failed to convert texture to RGBA",
         ));
       }
       if let Ok(mut t) = self.timings.lock() {
-        *t = (t1, t2 - t1, t0.elapsed().as_secs_f64() * 1000.0 - t2);
+        *t = (map_time_ms, t2 - map_time_ms, t0.elapsed().as_secs_f64() * 1000.0 - t2);
       }
       Ok(())
     })();
