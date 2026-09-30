@@ -199,27 +199,6 @@ impl ShmGraphicBuffer {
     &self.name
   }
 
-  /// Whether the terminal has *not* yet consumed this segment.
-  ///
-  /// The kitty protocol has the terminal unlink a `t=s` segment once it has read
-  /// it, so the mere existence of the file is a liveness signal: present means
-  /// the terminal has not read it yet, absent means it has. This is how the
-  /// tmux path knows a segment is safe to refill, without the transmission acks
-  /// that `q=2` suppresses (tmux feeds the replies back as keystrokes).
-  #[napi]
-  pub fn is_pending(&self) -> bool {
-    // O_EXCL without O_CREAT: succeeds only when the name is free.
-    match shm_open(self.name(), OFlag::O_EXCL | OFlag::O_RDWR, Mode::S_IRUSR) {
-      Ok(fd) => {
-        // Raced with the terminal unlinking it, or never created. Either way it
-        // is not pending; drop the fd without creating anything.
-        drop(fd);
-        false
-      }
-      Err(_) => true,
-    }
-  }
-
   /// Writes the raster, but refuses if the terminal has not yet read the
   /// previous contents of this segment.
   ///

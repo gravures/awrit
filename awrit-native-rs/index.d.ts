@@ -4,16 +4,6 @@ export declare class ShmGraphicBuffer {
   /** Creates a new shared memory buffer with a unique name with the provided size */
   constructor(size: number)
   /**
-   * Whether the terminal has *not* yet consumed this segment.
-   *
-   * The kitty protocol has the terminal unlink a `t=s` segment once it has read
-   * it, so the mere existence of the file is a liveness signal: present means
-   * the terminal has not read it yet, absent means it has. This is how the
-   * tmux path knows a segment is safe to refill, without the transmission acks
-   * that `q=2` suppresses (tmux feeds the replies back as keystrokes).
-   */
-  isPending(): boolean
-  /**
    * Writes the raster, but refuses if the terminal has not yet read the
    * previous contents of this segment.
    *
