@@ -509,7 +509,16 @@ export function registerPaintedContentTmux(
         renderer.releaseSlot(slotOverlay);
       }
 
-      const imageId = allocateTmuxImageId();
+      // Base frames reuse their slot id as the image id. Unlike PNG, where the
+      // bytes ride along inside the escape sequence, a t=s image is only a
+      // filename: the terminal has to open the segment and upload it to a
+      // texture before it has anything to draw. A fresh id per frame means
+      // every frame's placeholders can be applied while that frame's texture is
+      // still uploading, and those cells fall back to the pane background --
+      // the transient partial black row. A stable id is already resident, so
+      // there is no such window. Crops are rare and short-lived, and want a
+      // fresh id so a stale crop cannot linger.
+      const imageId = cells ? allocateTmuxImageId() : slotId;
       const tBitmap = perfTime();
       const { width, height } = source.getSize();
       const pixels = source.toBitmap();
