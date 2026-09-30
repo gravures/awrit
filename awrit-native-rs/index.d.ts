@@ -3,6 +3,27 @@
 export declare class ShmGraphicBuffer {
   /** Creates a new shared memory buffer with a unique name with the provided size */
   constructor(size: number)
+  /**
+   * Whether the terminal has *not* yet consumed this segment.
+   *
+   * The kitty protocol has the terminal unlink a `t=s` segment once it has read
+   * it, so the mere existence of the file is a liveness signal: present means
+   * the terminal has not read it yet, absent means it has. This is how the
+   * tmux path knows a segment is safe to refill, without the transmission acks
+   * that `q=2` suppresses (tmux feeds the replies back as keystrokes).
+   */
+  isPending(): boolean
+  /**
+   * Writes the raster, but refuses if the terminal has not yet read the
+   * previous contents of this segment.
+   *
+   * `O_EXCL` is the whole mechanism: it succeeds only when the name is free,
+   * which — given the terminal unlinks a `t=s` segment once it has read it —
+   * is exactly when the previous frame has been consumed. Returns
+   * `Ok(false)` while the segment is still in flight, so the caller can pick
+   * another one instead of truncating a segment out from under a live read.
+   */
+  tryWrite(buffer: Buffer, imageWidth: number): boolean
   /** Returns the shared memory name as a base64 encoded string */
   get nameBase64(): string
   /** Creates and truncates the shared memory segment to the specified size, filling it with zeros */

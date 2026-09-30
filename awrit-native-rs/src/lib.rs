@@ -5,6 +5,7 @@ extern crate napi_derive;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use napi::bindgen_prelude::*;
+use nix::errno::Errno;
 use nix::fcntl::OFlag;
 use nix::sys::mman::{mmap, munmap, shm_open, shm_unlink, MapFlags, ProtFlags};
 use nix::sys::stat::Mode;
@@ -196,6 +197,85 @@ impl ShmGraphicBuffer {
   /// Returns a reference to the shared memory name
   pub fn name(&self) -> &str {
     &self.name
+  }
+
+  /// Whether the terminal has *not* yet consumed this segment.
+  ///
+  /// The kitty protocol has the terminal unlink a `t=s` segment once it has read
+  /// it, so the mere existence of the file is a liveness signal: present means
+  /// the terminal has not read it yet, absent means it has. This is how the
+  /// tmux path knows a segment is safe to refill, without the transmission acks
+  /// that `q=2` suppresses (tmux feeds the replies back as keystrokes).
+  #[napi]
+  pub fn is_pending(&self) -> bool {
+    // O_EXCL without O_CREAT: succeeds only when the name is free.
+    match shm_open(self.name(), OFlag::O_EXCL | OFlag::O_RDWR, Mode::S_IRUSR) {
+      Ok(fd) => {
+        // Raced with the terminal unlinking it, or never created. Either way it
+        // is not pending; drop the fd without creating anything.
+        drop(fd);
+        false
+      }
+      Err(_) => true,
+    }
+  }
+
+  /// Writes the raster, but refuses if the terminal has not yet read the
+  /// previous contents of this segment.
+  ///
+  /// `O_EXCL` is the whole mechanism: it succeeds only when the name is free,
+  /// which — given the terminal unlinks a `t=s` segment once it has read it —
+  /// is exactly when the previous frame has been consumed. Returns
+  /// `Ok(false)` while the segment is still in flight, so the caller can pick
+  /// another one instead of truncating a segment out from under a live read.
+  #[napi]
+  pub fn try_write(&self, buffer: Buffer, image_width: u32) -> napi::Result<bool> {
+    let fd = match shm_open(
+      self.name(),
+      OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_RDWR,
+      Mode::S_IRUSR | Mode::S_IWUSR,
+    ) {
+      Ok(fd) => fd,
+      // Still pending: the terminal has not read the previous frame yet.
+      Err(Errno::EEXIST) => return Ok(false),
+      Err(e) => {
+        return Err(napi::Error::from_reason(format!(
+          "Failed to open shared memory: {}",
+          e
+        )));
+      }
+    };
+
+    ftruncate(&fd, self.size as i64)
+      .map_err(|e| napi::Error::from_reason(format!("Failed to truncate shared memory: {}", e)))?;
+
+    let size = NonZeroUsize::new(self.size as usize)
+      .ok_or_else(|| napi::Error::from_reason("Size must be non-zero"))?;
+
+    // Same in-place conversion as `write`; only the open above differs.
+    let ptr = unsafe {
+      mmap(
+        None,
+        size,
+        ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
+        MapFlags::MAP_SHARED,
+        fd,
+        0,
+      )
+      .map_err(|e| napi::Error::from_reason(format!("Failed to mmap shared memory: {}", e)))?
+    };
+    let src_slice = buffer.as_ref();
+    let dst_slice =
+      unsafe { std::slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, self.size as usize) };
+    if !bgra_to_rgba::bgra_to_rgba(src_slice, dst_slice) {
+      return Err(napi::Error::from_reason("Failed to convert BGRA to RGBA"));
+    }
+    unsafe {
+      munmap(ptr, size.get())
+        .map_err(|e| napi::Error::from_reason(format!("Failed to munmap shared memory: {}", e)))?;
+    }
+    let _ = image_width;
+    Ok(true)
   }
 
   /// Returns the shared memory name as a base64 encoded string
