@@ -1,12 +1,5 @@
 import fs from 'node:fs';
-import {
-  encodePngOpaque,
-  encodePngPal,
-  getWindowSize,
-  pinTexture,
-  ShmGraphicBuffer,
-  unpinTexture,
-} from 'awrit-native-rs';
+import { getWindowSize, pinTexture, ShmGraphicBuffer, unpinTexture } from 'awrit-native-rs';
 import type { BrowserWindow, NativeImage, Rectangle } from 'electron';
 import { screen } from 'electron';
 import { abort } from './abort';
@@ -73,11 +66,17 @@ type PaintedContent = {
 };
 
 const weakPaintedContents_ = new WeakMap<BrowserWindow, PaintedContent>();
+type TmuxShmMedia = {
+  nameBase64: string;
+  width: number;
+  height: number;
+};
 type TmuxPaintRenderer = {
   close(): void;
   releaseSlot(slotId: number): void;
-  renderPng(
-    pngBuffer: Buffer,
+  renderPixels(
+    prepare: () => TmuxShmMedia,
+    rasterBytes: number,
     imageId: number,
     cols: number,
     rows: number,
@@ -95,6 +94,16 @@ function createTmuxRenderer(): TmuxPaintRenderer | null {
 
 const tmuxRenderer = createTmuxRenderer();
 const allocateTmuxImageId = createImageIdAllocator();
+
+// Retired shm segments, kept referenced for the process lifetime.
+//
+// Dropping a `ShmGraphicBuffer` runs its napi `ObjectFinalize`, which calls
+// `shm_unlink` — removing a segment the terminal may still be reading, because
+// the terminal consumes the pixels asynchronously from the escape code that
+// named it. Holding a reference here prevents that GC-driven unlink for
+// segments a resize cycle retired. Leak is bounded: one ring per resize, and a
+// resize is rare.
+const keptBuffers_ = new Set<ShmGraphicBuffer>();
 
 // Mirrors perf.ts: read once at load, so the probe below costs nothing when off.
 const perfEnabled = process.env.AWRIT_PERF === '1';
@@ -269,47 +278,10 @@ function unionCells(a: CellRegion, b: CellRegion): CellRegion {
   };
 }
 
-/**
- * Encode a frame for tmux, preferring the native encoder.
- *
- * The write to tmux is 85-90% of delivery and is bytes-bound, so the win is in
- * bytes, not encode time: on captured page content `png` produces 12.6-22.7%
- * fewer bytes than Electron, bit-exact (06-05).
- *
- * Two fallbacks to Electron, both deliberate:
- * - `null` means the frame has transparency. Electron's `toBitmap()` is
- *   premultiplied, so encoding it as straight alpha would shift colours. The
- *   native encoder refuses rather than guess.
- * - A throw means the native path is broken. Paint handlers must never reject
- *   (06-02 lesson), so Electron's own `toPNG()` still produces a frame.
- */
-function encodeTmuxPng(source: NativeImage): Buffer {
-  try {
-    const { width, height } = source.getSize();
-    // Preferred: indexed/palette. 60-84% fewer bytes than Electron and a
-    // 12-32ms encode on the captured frames; the palette is reused across
-    // frames so the NeuQuant cost amortises. Falls back to truecolour if the
-    // quantiser fails, then to Electron only for transparent frames.
-    const pal = encodePngPal(source.toBitmap(), width, height);
-    if (pal) {
-      perfCount('submit.png.pal');
-      return pal;
-    }
-    const native = encodePngOpaque(source.toBitmap(), width, height);
-    if (native) {
-      perfCount('submit.png.native');
-      return native;
-    }
-    perfCount('submit.png.transparent');
-  } catch (error) {
-    console_.error('native png encode failed; using electron toPNG', error);
-    perfCount('submit.png.failed');
-  }
-  perfCount('submit.png.electron');
-  return source.toPNG();
-}
-
-export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutNode): PaintedContent {
+export function registerPaintedContentTmux(
+  w: BrowserWindow,
+  layoutNode: LayoutNode,
+): PaintedContent {
   const contents = w.webContents;
   // Two slots: base carries full frames (replacing it repaints everything);
   // overlay carries the bounding box of all crops since the last full frame,
@@ -324,6 +296,85 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
   // rather than lost -- otherwise the pane keeps stale cells until a full frame.
   let queued: CellRegion | undefined;
   const coalescer = new FrameCoalescer<PaintJob>((job) => deliver(job));
+
+  // A ring of shm segments per slot, refilled on every flush.
+  //
+  // The terminal reads a referenced segment *asynchronously*, out of band from
+  // the escape code that named it, and unlinks it when done. Two hazards, both
+  // observed as black frames, black bands and tearing:
+  //
+  //  1. `ShmGraphicBuffer::write` re-creates the segment (O_CREAT + ftruncate)
+  //     under the same name. Refilling a segment the terminal is still reading
+  //     hands it a half-written bitmap.
+  //  2. Dropping a `ShmGraphicBuffer` (GC) runs `shm_unlink` on its name, so a
+  //     segment that is merely *no longer referenced by us* can vanish from
+  //     under a read the terminal has not finished. The buffers below are held
+  //     for the lifetime of the window, so this cannot fire mid-read.
+  //
+  // PNG never had this problem: each frame's bytes were self-contained in its
+  // own escape code, so there was no moving target.
+  //
+  // The ring is sized to the *largest* raster this window will send and never
+  // resized. A crop declares its true w/h in the control data, so it reads only
+  // the leading bytes of a larger segment — that is what the protocol means by
+  // s=/v=. Reallocating per crop size (which changes on nearly every dirty
+  // rect) would churn the ring and reintroduce hazard 2 via GC.
+  //
+  // ponytail: the pool self-grows from MIN_RING and only ever grows on a
+  // resize, so there is no ring constant to tune. Without acks we cannot know
+  // the terminal's real backlog; O_EXCL on write is the only liveness signal
+  // available, because q=2 suppresses the replies a strict scheme would need.
+  // Pool floor, so a fresh window has somewhere to go before its first resize.
+  const MIN_RING = 4;
+  const shmBySlot = new Map<number, { buffers: ShmGraphicBuffer[]; size: number; next: number }>();
+  function prepareShm(slotId: number, pixels: Buffer, width: number, height: number) {
+    let entry = shmBySlot.get(slotId);
+    if (entry == null) {
+      // Grow-only, sized to the first (full-frame) raster we see. Later crops
+      // are smaller and fit; a *larger* raster grows the ring once.
+      entry = { buffers: [], size: pixels.length, next: 0 };
+      shmBySlot.set(slotId, entry);
+    }
+    if (pixels.length > entry.size) {
+      // Only a window resize gets here. Keep the old buffers alive in a fresh
+      // ring: a finalize would unlink a name the terminal may still read.
+      const grown: { buffers: ShmGraphicBuffer[]; size: number; next: number } = {
+        buffers: [],
+        size: pixels.length,
+        next: entry.next,
+      };
+      for (const b of entry.buffers) keptBuffers_.add(b);
+      entry = grown;
+      shmBySlot.set(slotId, entry);
+    }
+    const tShm = perfTime();
+    // Walk the pool from the rotation cursor. `try_write` opens with O_EXCL and
+    // so fails while the terminal has not yet read that segment -- the protocol
+    // has the terminal unlink a t=s segment once it has consumed it, which makes
+    // the name's existence a liveness signal. Skip a busy segment instead of
+    // clobbering a read in progress. Depth therefore follows the real backlog
+    // rather than a guessed constant, and needs no acks: q=2 suppresses them
+    // because tmux feeds the replies back as keystrokes.
+    const attempts = Math.max(entry.buffers.length, MIN_RING);
+    for (let i = 0; i < attempts; i++) {
+      if (entry.buffers.length <= i) entry.buffers.push(new ShmGraphicBuffer(entry.size));
+      const index = entry.next % entry.buffers.length;
+      const buffer = entry.buffers[index];
+      entry.next = (index + 1) % entry.buffers.length;
+      if (buffer.tryWrite(pixels, width)) {
+        perfEnd('submit.toShm', tShm);
+        return { nameBase64: buffer.nameBase64, width, height };
+      }
+    }
+    // Every segment is still in flight: the terminal is further behind than the
+    // pool. Give this frame a segment of its own rather than a torn one; the
+    // pool stays large until the terminal catches up.
+    const spare = new ShmGraphicBuffer(entry.size);
+    entry.buffers.push(spare);
+    spare.write(pixels, width);
+    perfEnd('submit.toShm', tShm);
+    return { nameBase64: spare.nameBase64, width, height };
+  }
 
   const result: PaintedContent = {
     destroy() {
@@ -459,13 +510,15 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
       }
 
       const imageId = allocateTmuxImageId();
-      const tPng = perfTime();
-      const png = encodeTmuxPng(source);
-      perfEnd('submit.toPNG', tPng);
-      perfEnd('submit.arrive→encode', job.tArrive);
+      const tBitmap = perfTime();
+      const { width, height } = source.getSize();
+      const pixels = source.toBitmap();
+      perfEnd('submit.toBitmap', tBitmap);
+      perfEnd('submit.arrive→raster', job.tArrive);
       const tSubmit = perfTime();
-      await renderer.renderPng(
-        png,
+      await renderer.renderPixels(
+        () => prepareShm(slotId, pixels, width, height),
+        pixels.length,
         imageId,
         cols,
         rows,
@@ -474,7 +527,7 @@ export function registerPaintedContentTmux(w: BrowserWindow, layoutNode: LayoutN
         job.pane,
         slotId,
       );
-      perfEnd('submit.encode→submit', tSubmit);
+      perfEnd('submit.raster→submit', tSubmit);
       perfCount('submit.completed');
     } catch (error) {
       console_.error('tmux renderer paint failed; retained frame queued for retry', error);

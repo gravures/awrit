@@ -56,6 +56,36 @@ export function buildTmuxDeleteImageCommand(id: number) {
   return wrapTmuxPassthrough(GFX`a=d,d=I,i=${id},q=2`);
 }
 
+/**
+ * Upload via POSIX shared memory instead of inline base64 pixels.
+ *
+ * The escape code carries a base64 *name*, not the image, so this is a single
+ * ~76-byte command regardless of frame size — against ~82KB of base64+DCS for
+ * the same frame via `buildTmuxUploadCommands`. The terminal reads the pixels
+ * straight out of the shm segment and unlinks it, so the caller must refill the
+ * segment before every send (see `ShmGraphicBuffer::write`).
+ *
+ * Verified end-to-end through tmux passthrough in Ghostty: 08-01-SHM-TEST.md.
+ */
+export function buildTmuxShmUploadCommands(
+  nameBase64: string,
+  id: number,
+  cols: number,
+  rows: number,
+  width: number,
+  height: number,
+): { upload: string[]; placement: string } {
+  // f=32 raw RGBA — unlike f=100 it carries alpha natively, so no opaque/alpha
+  // branch is needed on the way in. a=t: transmit only; the virtual placement
+  // below plus the Unicode placeholders do the display.
+  const upload = [
+    wrapTmuxPassthrough(GFX`a=t,i=${id},f=32,t=s,s=${width},v=${height},q=2;${nameBase64}`),
+  ];
+  // q=2 on both: tmux has no APC key handler and shreds replies into keystrokes.
+  const placement = wrapTmuxPassthrough(GFX`a=p,i=${id},U=1,c=${cols},r=${rows},q=2`);
+  return { upload, placement };
+}
+
 export function buildTmuxPlaceholderLines(
   id: number,
   startCol: number,
