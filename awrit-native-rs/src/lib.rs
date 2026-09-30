@@ -312,35 +312,52 @@ impl ShmGraphicBuffer {
     image_width: u32,
     dirty_rect: Option<DirtyRect>,
   ) -> napi::Result<()> {
-    // Open shared memory
-    let fd = shm_open(
-      self.name(),
-      OFlag::O_CREAT | OFlag::O_RDWR,
-      Mode::S_IRUSR | Mode::S_IWUSR,
-    )
-    .map_err(|e| napi::Error::from_reason(format!("Failed to open shared memory: {}", e)))?;
+    // Acquire or create cached mapping
+    let (dst_ptr, dst_len, map_time_ms) = {
+      let mut cached = self.cached.lock().map_err(|_| napi::Error::from_reason("cached mutex poisoned"))?;
+      if let Some((_fd, ptr, len)) = cached.as_ref() {
+        // Reuse existing mapping
+        let t0 = std::time::Instant::now();
+        let _ = t0; // map_time_ms ~0
+        (*ptr, *len, 0.0)
+      } else {
+        // First time: create shm object and map
+        let t0 = std::time::Instant::now();
+        let shm_fd = shm_open(
+          self.name(),
+          OFlag::O_CREAT | OFlag::O_RDWR,
+          Mode::S_IRUSR | Mode::S_IWUSR,
+        )
+        .map_err(|e| napi::Error::from_reason(format!("Failed to open shared memory: {}", e)))?;
 
-    ftruncate(&fd, self.size as i64)
-      .map_err(|e| napi::Error::from_reason(format!("Failed to truncate shared memory: {}", e)))?;
+        ftruncate(&shm_fd, self.size as i64).map_err(|e| {
+          napi::Error::from_reason(format!("Failed to truncate shared memory: {}", e))
+        })?;
 
-    let size = NonZeroUsize::new(self.size as usize)
-      .ok_or_else(|| napi::Error::from_reason("Size must be non-zero"))?;
+        let dst_size = NonZeroUsize::new(self.size as usize)
+          .ok_or_else(|| napi::Error::from_reason("Size must be non-zero"))?;
 
-    // Map the shared memory
-    let ptr = unsafe {
-      mmap(
-        None,
-        size,
-        ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
-        MapFlags::MAP_SHARED,
-        fd,
-        0,
-      )
-      .map_err(|e| napi::Error::from_reason(format!("Failed to mmap shared memory: {}", e)))?
+        let raw_ptr = unsafe {
+          mmap(
+            None,
+            dst_size,
+            ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
+            MapFlags::MAP_SHARED,
+            shm_fd.as_fd(),
+            0,
+          )
+          .map_err(|e| napi::Error::from_reason(format!("Failed to mmap shared memory: {}", e)))?
+        };
+        let map_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let dst_ptr = raw_ptr.cast::<u8>();
+        *cached = Some((shm_fd, dst_ptr, dst_size.get()));
+        (dst_ptr, dst_size.get(), map_ms)
+      }
     };
+
     let src_slice = buffer.as_ref();
     let dst_slice =
-      unsafe { std::slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, self.size as usize) };
+      unsafe { std::slice::from_raw_parts_mut(dst_ptr.as_ptr() as *mut u8, dst_len) };
 
     match dirty_rect {
       Some(rect) => {
@@ -361,11 +378,9 @@ impl ShmGraphicBuffer {
       }
     }
 
-    unsafe {
-      munmap(ptr, size.get())
-        .map_err(|e| napi::Error::from_reason(format!("Failed to munmap shared memory: {}", e)))?;
+    if let Ok(mut t) = self.timings.lock() {
+      *t = (map_time_ms, 0.0, 0.0); // convert time not split here
     }
-
     Ok(())
   }
 
