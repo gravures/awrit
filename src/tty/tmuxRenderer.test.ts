@@ -106,7 +106,9 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
-    expect(output.includes('a=t,i=77')).toBe(true);
+    // First flush: a=T (create). Second flush (no viewer change): SKIPPED (dedup).
+    expect(output.includes('a=T,i=77')).toBe(true);
+    expect(output.includes('a=t,i=77')).toBe(false);
     expect(output.includes('a=p,i=77')).toBe(true);
     expect(renderer.pendingBySlot.size).toBe(0);
 
@@ -141,8 +143,9 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
-    expect(output.match(/a=t,i=77/g)?.length).toBe(2);
-
+    // renderPixels flush (a=T). becameVisible flush (invisible->active): a=T (clears sentImageIds).
+    expect(output.match(/a=T,i=77/g)?.length).toBe(2);
+    expect(output.match(/a=t,i=77/g)?.length).toBe(0);
     renderer.close();
   });
 
@@ -172,7 +175,9 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
-    expect(output.match(/a=t,i=77/g)?.length).toBe(2);
+    // renderPixels flush (a=T). checkVisibilityAndFlush (active->active, no change): SKIPPED (dedup).
+    expect(output.match(/a=T,i=77/g)?.length).toBe(1);
+    expect(output.match(/a=t,i=77/g)?.length).toBe(0);
     renderer.close();
   });
 
@@ -205,7 +210,8 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
-    expect(output.match(/a=t,i=77/g)?.length).toBe(2);
+    // First flush fails (tmux error). Retry flush: a=T (create).
+    expect(output.match(/a=T,i=77/g)?.length).toBe(1);
     renderer.close();
   });
 
@@ -317,8 +323,13 @@ describe('TmuxRenderer', () => {
     viewers = 'client-b';
     await renderer.checkVisibilityAndFlush();
 
-    const output = readFileSync(outputPath, 'utf8');
-    expect(output.match(/a=t,i=77/g)?.length).toBe(3);
+const output = readFileSync(outputPath, 'utf8');
+    // renderPixels flush (a=T). Polling flush (no viewer change): SKIPPED (dedup).
+    // Viewer change (client-a -> client-b): a=T (re-create for new client).
+    const aTCount = output.match(/a=T,i=77/g)?.length ?? 0;
+    const atCount = output.match(/a=t,i=77/g)?.length ?? 0;
+    expect(aTCount).toBe(2);
+    expect(atCount).toBe(0);
     renderer.close();
   });
 
@@ -395,7 +406,10 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
-    expect(output.includes('a=t,i=88')).toBe(true);
+    // First flush failed (fd=-1). Retry with new imageId 88: a=T (first send of 88).
+    // ImageId 77 was never successfully sent, so not in output.
+    expect(output.includes('a=T,i=88')).toBe(true);
+    expect(output.includes('a=t,i=88')).toBe(false);
     expect(output.includes('a=t,i=77')).toBe(false);
     renderer.close();
   });

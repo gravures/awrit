@@ -317,8 +317,9 @@ export async function createWindowWithToolbar(
 
   function registerPaints(bitmapSize: Size) {
     if (useTmuxRenderer) {
+      // tmux path doesn't support z-index layers; only paint content
+      // toolbar is rendered separately (or merged) to avoid duplicate frames
       destructors.push(
-        registerPaintedContentTmux(toolbar, toolbarNode).destroy,
         registerPaintedContentTmux(content, contentNode).destroy,
       );
     } else if (hasAnimation) {

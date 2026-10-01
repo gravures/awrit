@@ -227,6 +227,7 @@ export class TmuxRenderer {
         perfEnd('deliver.shm', t);
 
         t = perfTime();
+        const isFirst = true; // base implementation: each frame gets new imageId
         const { upload: uploadCommands, placement } = buildTmuxShmUploadCommands(
           media.nameBase64,
           request.imageId,
@@ -234,6 +235,9 @@ export class TmuxRenderer {
           request.rows,
           media.width,
           media.height,
+          isFirst,
+          request.startCol,
+          request.startRow,
         );
         perfEnd('deliver.upload', t);
 

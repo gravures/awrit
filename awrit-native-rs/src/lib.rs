@@ -214,59 +214,73 @@ impl ShmGraphicBuffer {
   /// Writes the raster, but refuses if the terminal has not yet read the
   /// previous contents of this segment.
   ///
-  /// `O_EXCL` is the whole mechanism: it succeeds only when the name is free,
-  /// which — given the terminal unlinks a `t=s` segment once it has read it —
-  /// is exactly when the previous frame has been consumed. Returns
-  /// `Ok(false)` while the segment is still in flight, so the caller can pick
-  /// another one instead of truncating a segment out from under a live read.
-  ///
   /// On first use: `O_CREAT|O_EXCL` creates segment, mmap and cache fd+ptr.
   /// On reuse: terminal has consumed (pool rotation), use cached mmap directly.
+  /// Returns `Ok(false)` if segment still in use (shouldn't happen with pool rotation).
   #[napi]
   pub fn try_write(&self, buffer: Buffer, image_width: u32) -> napi::Result<bool> {
-    let fd = match shm_open(
-      self.name(),
-      OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_RDWR,
-      Mode::S_IRUSR | Mode::S_IWUSR,
-    ) {
-      Ok(fd) => fd,
-      // Still pending: the terminal has not read the previous frame yet.
-      Err(Errno::EEXIST) => return Ok(false),
-      Err(e) => {
-        return Err(napi::Error::from_reason(format!(
-          "Failed to open shared memory: {}",
-          e
-        )));
+    // Get or create cached mapping
+    let (dst_ptr, dst_len, map_time_ms) = {
+      let mut cached = self
+        .cached
+        .lock()
+        .map_err(|_| napi::Error::from_reason("cached mutex poisoned"))?;
+      if let Some((_fd, ptr, len)) = cached.as_ref() {
+        // Reuse existing mapping - terminal consumed this segment N frames ago
+        (*ptr, *len, 0.0)
+      } else {
+        // First time: create segment with O_EXCL (fails if name exists = terminal hasn't consumed)
+        let t0 = std::time::Instant::now();
+        let fd = match shm_open(
+          self.name(),
+          OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_RDWR,
+          Mode::S_IRUSR | Mode::S_IWUSR,
+        ) {
+          Ok(fd) => fd,
+          Err(Errno::EEXIST) => return Ok(false), // Shouldn't happen with pool rotation
+          Err(e) => {
+            return Err(napi::Error::from_reason(format!(
+              "Failed to open shared memory: {}",
+              e
+            )));
+          }
+        };
+
+        ftruncate(&fd, self.size as i64).map_err(|e| {
+          napi::Error::from_reason(format!("Failed to truncate shared memory: {}", e))
+        })?;
+
+        let dst_size = NonZeroUsize::new(self.size as usize)
+          .ok_or_else(|| napi::Error::from_reason("Size must be non-zero"))?;
+
+        let raw_ptr = unsafe {
+          mmap(
+            None,
+            dst_size,
+            ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
+            MapFlags::MAP_SHARED,
+            fd.as_fd(),
+            0,
+          )
+          .map_err(|e| napi::Error::from_reason(format!("Failed to mmap shared memory: {}", e)))?
+        };
+        let map_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let dst_ptr = raw_ptr.cast::<u8>();
+        *cached = Some((fd, dst_ptr, dst_size.get()));
+        (dst_ptr, dst_size.get(), map_ms)
       }
     };
 
-    ftruncate(&fd, self.size as i64)
-      .map_err(|e| napi::Error::from_reason(format!("Failed to truncate shared memory: {}", e)))?;
-
-    let size = NonZeroUsize::new(self.size as usize)
-      .ok_or_else(|| napi::Error::from_reason("Size must be non-zero"))?;
-
-    // Same in-place conversion as `write`; only the open above differs.
-    let ptr = unsafe {
-      mmap(
-        None,
-        size,
-        ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
-        MapFlags::MAP_SHARED,
-        fd,
-        0,
-      )
-      .map_err(|e| napi::Error::from_reason(format!("Failed to mmap shared memory: {}", e)))?
-    };
+    // Convert directly into the cached mapping
     let src_slice = buffer.as_ref();
-    let dst_slice =
-      unsafe { std::slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, self.size as usize) };
+    let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst_ptr.as_ptr() as *mut u8, dst_len) };
     if !bgra_to_rgba::bgra_to_rgba(src_slice, dst_slice) {
       return Err(napi::Error::from_reason("Failed to convert BGRA to RGBA"));
     }
-    unsafe {
-      munmap(ptr, size.get())
-        .map_err(|e| napi::Error::from_reason(format!("Failed to munmap shared memory: {}", e)))?;
+
+    // Don't unmap - keep the mapping cached for next cycle
+    if let Ok(mut t) = self.timings.lock() {
+      *t = (map_time_ms, 0.0, 0.0);
     }
     let _ = image_width;
     Ok(true)

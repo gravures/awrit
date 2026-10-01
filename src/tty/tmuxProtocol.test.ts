@@ -89,6 +89,7 @@ describe('tmuxProtocol', () => {
       4,
       790,
       814,
+      true, // first frame for this image ID
     );
 
     // One command regardless of raster size: the payload is a base64 name, not
@@ -100,7 +101,7 @@ describe('tmuxProtocol', () => {
 
     const { control, payload } = parseFirstGraphicsCommand(unwrapTmux(command));
     const ctrl = controlMap(control);
-    expect(ctrl.get('a')).toBe('t');
+    expect(ctrl.get('a')).toBe('T');
     expect(ctrl.get('f')).toBe('32');
     expect(ctrl.get('t')).toBe('s');
     expect(ctrl.get('s')).toBe('790');
@@ -128,7 +129,7 @@ describe('tmuxProtocol', () => {
     // A crop therefore lands in a segment bigger than it needs, and s=/v= are
     // what tell the terminal how much to read. If s=/v= were omitted the
     // terminal would read the whole segment and show garbage.
-    const { upload } = buildTmuxShmUploadCommands('c2Vnb25seQ==', 7, 40, 10, 800, 200);
+    const { upload } = buildTmuxShmUploadCommands('c2Vnb25seQ==', 7, 40, 10, 800, 200, true);
     const ctrl = controlMap(parseFirstGraphicsCommand(unwrapTmux(upload[0])).control);
     expect(ctrl.get('s')).toBe('800');
     expect(ctrl.get('v')).toBe('200');

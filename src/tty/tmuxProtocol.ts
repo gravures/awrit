@@ -74,15 +74,20 @@ export function buildTmuxShmUploadCommands(
   rows: number,
   width: number,
   height: number,
+  isFirst: boolean,
+  startCol: number,
+  startRow: number,
 ): { upload: string[]; placement: string } {
-  // f=32 raw RGBA — unlike f=100 it carries alpha natively, so no opaque/alpha
-  // branch is needed on the way in. a=t: transmit only; the virtual placement
-  // below plus the Unicode placeholders do the display.
+  // f=32 raw RGBA. a=T: transfer AND display (create new image).
+  // a=t: transfer only (update existing image).
+  // t=s: unlink after read — terminal consumes segment, enabling pool rotation.
+  const action = isFirst ? 'T' : 't';
   const upload = [
-    wrapTmuxPassthrough(GFX`a=t,i=${id},f=32,t=s,s=${width},v=${height},q=2;${nameBase64}`),
+    wrapTmuxPassthrough(GFX`a=${action},i=${id},f=32,t=s,s=${width},v=${height},q=2;${nameBase64}`),
   ];
   // q=2 on both: tmux has no APC key handler and shreds replies into keystrokes.
-  const placement = wrapTmuxPassthrough(GFX`a=p,i=${id},U=1,c=${cols},r=${rows},q=2`);
+  // x/y position the image at the correct pane location (matches placeholder CUP).
+  const placement = wrapTmuxPassthrough(GFX`a=p,i=${id},U=1,c=${cols},r=${rows},x=${startCol},y=${startRow},q=2`);
   return { upload, placement };
 }
 
