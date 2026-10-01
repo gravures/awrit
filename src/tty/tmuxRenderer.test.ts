@@ -106,6 +106,7 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
+    // The retained hidden repaint is flushed once the pane is visible.
     expect(output.includes('a=t,i=77')).toBe(true);
     expect(output.includes('a=p,i=77')).toBe(true);
     expect(renderer.pendingBySlot.size).toBe(0);
@@ -141,8 +142,9 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
+    // renderPixels flush. invisible clears residency, so the becameVisible
+    // flush (invisible->active) re-sends.
     expect(output.match(/a=t,i=77/g)?.length).toBe(2);
-
     renderer.close();
   });
 
@@ -172,7 +174,8 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
-    expect(output.match(/a=t,i=77/g)?.length).toBe(2);
+    // renderPixels flush. checkVisibilityAndFlush (active->active, no change): SKIPPED (dedup).
+    expect(output.match(/a=t,i=77/g)?.length).toBe(1);
     renderer.close();
   });
 
@@ -205,7 +208,8 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
-    expect(output.match(/a=t,i=77/g)?.length).toBe(2);
+    // First flush fails (tmux error). Retry flush re-sends.
+    expect(output.match(/a=t,i=77/g)?.length).toBe(1);
     renderer.close();
   });
 
@@ -318,7 +322,9 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
-    expect(output.match(/a=t,i=77/g)?.length).toBe(3);
+    // renderPixels flush. Polling flush (no viewer change): SKIPPED (dedup).
+    // Viewer change (client-a -> client-b): re-sent for the new client.
+    expect(output.match(/a=t,i=77/g)?.length).toBe(2);
     renderer.close();
   });
 
@@ -395,6 +401,8 @@ describe('TmuxRenderer', () => {
     await renderer.checkVisibilityAndFlush();
 
     const output = readFileSync(outputPath, 'utf8');
+    // First flush failed (fd=-1). Retry with new imageId 88.
+    // ImageId 77 was never successfully sent, so not in output.
     expect(output.includes('a=t,i=88')).toBe(true);
     expect(output.includes('a=t,i=77')).toBe(false);
     renderer.close();

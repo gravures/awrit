@@ -55,6 +55,10 @@ export class TmuxRenderer {
   private pendingBySlot: Map<number, RenderRequest>;
   private latestBySlot: Map<number, RenderRequest>;
   private displayedImageBySlot: Map<number, number>;
+  // Image ids the terminal currently holds for the attached client(s). Gates the
+  // skip-if-unchanged dedup; cleared whenever the client set or visibility
+  // status changes so a lost image is re-sent.
+  private residentImageIds: Set<number>;
   private flushInProgress: boolean;
   private flushPromise: Promise<void>;
   private paneState: () => TmuxPaneState;
@@ -67,13 +71,12 @@ export class TmuxRenderer {
 
   constructor(paneState: () => TmuxPaneState = getPaneState) {
     this.outputFd = process.stdout.fd;
-    this.dumpPlaceholdersPath = options['tmux-dump']
-      ? '/tmp/awrit-tmux-placeholders.log'
-      : null;
+    this.dumpPlaceholdersPath = options['tmux-dump'] ? '/tmp/awrit-tmux-placeholders.log' : null;
     this.dumpGfxPath = options['tmux-dump'] ? '/tmp/awrit-tmux-gfx.log' : null;
     this.pendingBySlot = new Map();
     this.latestBySlot = new Map();
     this.displayedImageBySlot = new Map();
+    this.residentImageIds = new Set();
     this.flushInProgress = false;
     this.flushPromise = Promise.resolve();
     this.paneState = paneState;
@@ -96,6 +99,7 @@ export class TmuxRenderer {
     this.latestBySlot.clear();
     const displayedImageIds = new Set(this.displayedImageBySlot.values());
     this.displayedImageBySlot.clear();
+    this.residentImageIds.clear();
     for (const imageId of displayedImageIds) {
       this.deleteImage(imageId);
     }
@@ -112,6 +116,7 @@ export class TmuxRenderer {
     const displayedImageId = this.displayedImageBySlot.get(slotId);
     if (displayedImageId == null) return;
     this.displayedImageBySlot.delete(slotId);
+    this.residentImageIds.delete(displayedImageId);
 
     this.deleteImage(displayedImageId);
   }
@@ -170,8 +175,23 @@ export class TmuxRenderer {
       this.currentPaneState = { status: 'invisible', viewers: '' };
     }
 
+    if (this.currentPaneState.status === 'invisible') {
+      // The pane is hidden, so any image tmux was showing is gone with it.
+      this.residentImageIds.clear();
+    }
+
+    // `unknown` means the pane state was never determined (the first query
+    // failed), so recovering a real client list is not a viewer *change*: the
+    // frame already went out, and re-sending it would just duplicate the upload.
     const viewersChanged =
-      previousState != null && previousState.viewers !== this.currentPaneState.viewers;
+      previousState != null &&
+      previousState.viewers !== this.currentPaneState.viewers &&
+      previousState.viewers !== 'unknown';
+    if (viewersChanged) {
+      // A new/removed client needs every retained image again.
+      this.residentImageIds.clear();
+    }
+
     if (
       this.currentPaneState.status !== 'invisible' &&
       (previousState?.status === 'invisible' ||
@@ -183,7 +203,11 @@ export class TmuxRenderer {
       this.retryRequired = false;
       try {
         for (const [slotId, request] of this.latestBySlot) {
-          this.pendingBySlot.set(slotId, request);
+          // Skip images the current client already holds: a static pane with an
+          // unchanged viewer set should not re-upload frame after frame.
+          if (!this.residentImageIds.has(request.imageId)) {
+            this.pendingBySlot.set(slotId, request);
+          }
         }
         await this.scheduleFlush();
       } catch {
@@ -227,6 +251,8 @@ export class TmuxRenderer {
         perfEnd('deliver.shm', t);
 
         t = perfTime();
+        // a=t transfers (and creates, if absent) without displaying; the
+        // placement command below is what puts it on screen.
         const { upload: uploadCommands, placement } = buildTmuxShmUploadCommands(
           media.nameBase64,
           request.imageId,
@@ -272,6 +298,7 @@ export class TmuxRenderer {
 
         const previousImageId = this.displayedImageBySlot.get(request.slotId);
         if (previousImageId != null && previousImageId !== request.imageId) {
+          this.residentImageIds.delete(previousImageId);
           const deleteCommand = buildTmuxDeleteImageCommand(previousImageId);
           output += deleteCommand;
           if (this.dumpGfxPath) {
@@ -295,6 +322,7 @@ export class TmuxRenderer {
         perfEnd('deliver.write', writeStart);
         for (const request of batch) {
           this.displayedImageBySlot.set(request.slotId, request.imageId);
+          this.residentImageIds.add(request.imageId);
         }
       } catch (error) {
         for (const request of batch) {

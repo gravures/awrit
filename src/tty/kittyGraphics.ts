@@ -84,7 +84,7 @@ function span_(span: CellSpan) {
 
 function shmRgba_(nameBase64: string, size: Size, control: string) {
   // f=32 rgba 32-bit
-  // t=s SHM name
+  // t=s SHM name (unlink after read) — terminal consumes and unlinks, enabling pool rotation
   stdout.write(GFX`f=32,t=s${sv_size_(size)},${control};${nameBase64}`);
 }
 

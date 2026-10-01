@@ -5,6 +5,7 @@ extern crate napi_derive;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use napi::bindgen_prelude::*;
+#[cfg(not(target_os = "linux"))]
 use nix::errno::Errno;
 use nix::fcntl::OFlag;
 use nix::sys::mman::{mmap, munmap, shm_open, shm_unlink, MapFlags, ProtFlags};
@@ -154,7 +155,20 @@ pub fn unpin_texture(id: u32) {
 
 #[napi(custom_finalize)]
 pub struct ShmGraphicBuffer {
+  /// Name handed to the terminal for each transmission.
+  ///
+  /// On Linux this is a *hardlink* to `anchor`, re-created for every send: the
+  /// kitty protocol makes the terminal unlink a `t=s` name once it has read it,
+  /// so a segment name is single-use, and the cached mapping would be dead
+  /// after the first read without a way to name the same inode again.
   name: String,
+  /// Linux only: a second, never-transmitted name for the *same* inode.
+  ///
+  /// The terminal only ever unlinks the name it was handed, so this keeps the
+  /// object alive and addressable across reads. POSIX cannot re-name an
+  /// unlinked inode, so this anchor is what lets the cached mapping below stay
+  /// valid frame after frame.
+  anchor: String,
   size: u32,
   /// Cached mapping to avoid per-frame mmap/munmap page-fault cost.
   /// (fd, ptr, len)
@@ -176,6 +190,8 @@ impl ObjectFinalize for ShmGraphicBuffer {
     }
     // Attempt to unlink the shared memory, doesn't really matter if it fails
     let _ = shm_unlink(self.name());
+    // Release the anchor too, or the inode would outlive this buffer.
+    let _ = shm_unlink(self.anchor.as_str());
     Ok(())
   }
 }
@@ -197,9 +213,13 @@ impl ShmGraphicBuffer {
       &hex
     };
     let name = format!("/awrit_{}", significant_part);
+    // A distinct alias for the same inode, never handed to the terminal; see
+    // the `anchor` field docs. It is created alongside `name`.
+    let anchor = format!("{}_a", name);
 
     Self {
       name,
+      anchor,
       size,
       cached: Mutex::new(None),
       timings: std::sync::Mutex::new((0.0, 0.0, 0.0)),
@@ -211,62 +231,146 @@ impl ShmGraphicBuffer {
     &self.name
   }
 
-  /// Writes the raster, but refuses if the terminal has not yet read the
-  /// previous contents of this segment.
+  /// The persistent alias for the same inode (see the `anchor` field docs).
+  fn anchor(&self) -> &str {
+    &self.anchor
+  }
+
+  /// Make this segment ready to receive a frame and return its mapping.
   ///
-  /// `O_EXCL` is the whole mechanism: it succeeds only when the name is free,
-  /// which — given the terminal unlinks a `t=s` segment once it has read it —
-  /// is exactly when the previous frame has been consumed. Returns
-  /// `Ok(false)` while the segment is still in flight, so the caller can pick
-  /// another one instead of truncating a segment out from under a live read.
+  /// On Linux the object is created once under `anchor` and mapped once; every
+  /// later call reuses that mapping, which is the whole point of the cache.
+  /// `exclusive` selects `try_write`'s liveness semantics: `Ok(None)` means the
+  /// terminal has not read the previous frame yet, so the caller must pick
+  /// another segment rather than overwrite a read in progress.
   ///
-  /// On first use: `O_CREAT|O_EXCL` creates segment, mmap and cache fd+ptr.
-  /// On reuse: terminal has consumed (pool rotation), use cached mmap directly.
-  #[napi]
-  pub fn try_write(&self, buffer: Buffer, image_width: u32) -> napi::Result<bool> {
-    let fd = match shm_open(
-      self.name(),
-      OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_RDWR,
-      Mode::S_IRUSR | Mode::S_IWUSR,
-    ) {
+  /// Elsewhere shared memory cannot be hardlinked, so each call makes a fresh
+  /// object under `name` (no mapping cache) and `exclusive` is an `O_EXCL`
+  /// claim.
+  #[cfg(target_os = "linux")]
+  fn ensure_object(&self, exclusive: bool) -> napi::Result<Option<(NonNull<u8>, usize, f64)>> {
+    let mut cached = self
+      .cached
+      .lock()
+      .map_err(|_| napi::Error::from_reason("cached mutex poisoned"))?;
+    let (ptr, len, map_time_ms) = match cached.as_ref() {
+      Some((_fd, ptr, len)) => (*ptr, *len, 0.0),
+      None => {
+        let t0 = std::time::Instant::now();
+        let fd = shm_open(
+          self.anchor(),
+          OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_RDWR,
+          Mode::S_IRUSR | Mode::S_IWUSR,
+        )
+        .map_err(|e| napi::Error::from_reason(format!("Failed to open shared memory: {}", e)))?;
+
+        ftruncate(&fd, self.size as i64).map_err(|e| {
+          napi::Error::from_reason(format!("Failed to truncate shared memory: {}", e))
+        })?;
+
+        let (ptr, len) = map_fd(&fd, self.size)?;
+        let map_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        *cached = Some((fd, ptr, len));
+        (ptr, len, map_ms)
+      }
+    };
+
+    if exclusive && send_name_exists(self.name()) {
+      // Terminal still holds the previous frame; leave it alone.
+      return Ok(None);
+    }
+    Ok(Some((ptr, len, map_time_ms)))
+  }
+
+  #[cfg(not(target_os = "linux"))]
+  fn ensure_object(&self, exclusive: bool) -> napi::Result<Option<(NonNull<u8>, usize, f64)>> {
+    let mut flags = OFlag::O_CREAT | OFlag::O_RDWR;
+    if exclusive {
+      flags |= OFlag::O_EXCL;
+    }
+    let t0 = std::time::Instant::now();
+    let fd = match shm_open(self.name(), flags, Mode::S_IRUSR | Mode::S_IWUSR) {
       Ok(fd) => fd,
-      // Still pending: the terminal has not read the previous frame yet.
-      Err(Errno::EEXIST) => return Ok(false),
+      Err(Errno::EEXIST) if exclusive => return Ok(None),
       Err(e) => {
         return Err(napi::Error::from_reason(format!(
           "Failed to open shared memory: {}",
           e
-        )));
+        )))
       }
     };
 
     ftruncate(&fd, self.size as i64)
       .map_err(|e| napi::Error::from_reason(format!("Failed to truncate shared memory: {}", e)))?;
 
-    let size = NonZeroUsize::new(self.size as usize)
-      .ok_or_else(|| napi::Error::from_reason("Size must be non-zero"))?;
+    let (ptr, len) = map_fd(&fd, self.size)?;
+    let map_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
-    // Same in-place conversion as `write`; only the open above differs.
-    let ptr = unsafe {
-      mmap(
-        None,
-        size,
-        ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
-        MapFlags::MAP_SHARED,
-        fd,
-        0,
-      )
-      .map_err(|e| napi::Error::from_reason(format!("Failed to mmap shared memory: {}", e)))?
+    let mut cached = self
+      .cached
+      .lock()
+      .map_err(|_| napi::Error::from_reason("cached mutex poisoned"))?;
+    if let Some((_old, old_ptr, old_len)) = cached.take() {
+      unsafe {
+        let _ = munmap(old_ptr.cast::<std::ffi::c_void>(), old_len);
+      }
+    }
+    *cached = Some((fd, ptr, len));
+    Ok(Some((ptr, len, map_ms)))
+  }
+
+  /// Publish the send name after the caller has filled the mapping.
+  ///
+  /// On Linux, re-link `anchor` to `name` if the terminal consumed (and thereby
+  /// unlinked) the previous one. Linking only after the write means the terminal
+  /// can never observe a half-filled segment.
+  #[cfg(target_os = "linux")]
+  fn publish(&self) -> napi::Result<()> {
+    use nix::fcntl::AtFlags;
+    use nix::unistd::linkat;
+    if send_name_exists(self.name()) {
+      return Ok(());
+    }
+    let anchor = format!("/dev/shm{}", self.anchor());
+    let name = format!("/dev/shm{}", self.name());
+    linkat(None, anchor.as_str(), None, name.as_str(), AtFlags::empty())
+      .map_err(|e| napi::Error::from_reason(format!("Failed to link shared memory: {}", e)))?;
+    Ok(())
+  }
+
+  #[cfg(not(target_os = "linux"))]
+  fn publish(&self) -> napi::Result<()> {
+    Ok(())
+  }
+
+  /// Writes the raster, but refuses if the terminal has not yet read the
+  /// previous contents of this segment.
+  ///
+  /// The object itself is created once (Linux, under the anchor) and the cached
+  /// mapping reused every cycle. The *name* the terminal gets is re-published
+  /// per frame because a `t=s` name is single-use: the terminal unlinks it as
+  /// soon as it has read it. Returns `Ok(false)` if the name is still present,
+  /// i.e. the terminal has not finished the previous read.
+  #[napi]
+  pub fn try_write(&self, buffer: Buffer, image_width: u32) -> napi::Result<bool> {
+    let Some((dst_ptr, dst_len, map_time_ms)) = self.ensure_object(true)? else {
+      // Terminal has not read the previous frame in this segment yet.
+      return Ok(false);
     };
+
+    // Convert directly into the cached mapping.
     let src_slice = buffer.as_ref();
-    let dst_slice =
-      unsafe { std::slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, self.size as usize) };
+    let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst_ptr.as_ptr() as *mut u8, dst_len) };
     if !bgra_to_rgba::bgra_to_rgba(src_slice, dst_slice) {
       return Err(napi::Error::from_reason("Failed to convert BGRA to RGBA"));
     }
-    unsafe {
-      munmap(ptr, size.get())
-        .map_err(|e| napi::Error::from_reason(format!("Failed to munmap shared memory: {}", e)))?;
+
+    // Re-publish the send name only now, so the terminal can never read a
+    // half-filled segment. On Linux the mapping stays cached and warm.
+    self.publish()?;
+
+    if let Ok(mut t) = self.timings.lock() {
+      *t = (map_time_ms, 0.0, 0.0);
     }
     let _ = image_width;
     Ok(true)
@@ -281,19 +385,11 @@ impl ShmGraphicBuffer {
   /// Creates and truncates the shared memory segment to the specified size, filling it with zeros
   #[napi]
   pub fn write_empty(&self) -> napi::Result<()> {
-    // Open shared memory with create flag
-    let fd = shm_open(
-      self.name(),
-      OFlag::O_CREAT | OFlag::O_RDWR,
-      Mode::S_IRUSR | Mode::S_IWUSR,
-    )
-    .map_err(|e| napi::Error::from_reason(format!("Failed to open shared memory: {}", e)))?;
-
-    // Truncate to desired size
-    ftruncate(fd, self.size as i64)
-      .map_err(|e| napi::Error::from_reason(format!("Failed to truncate shared memory: {}", e)))?;
-
-    // Close the file descriptor - fd is automatically closed when dropped
+    // Map (and on Linux create) the segment; ftruncate leaves it zero-filled.
+    self
+      .ensure_object(false)?
+      .ok_or_else(|| napi::Error::from_reason("Failed to map shared memory"))?;
+    self.publish()?;
     Ok(())
   }
 
@@ -315,51 +411,10 @@ impl ShmGraphicBuffer {
     image_width: u32,
     dirty_rect: Option<DirtyRect>,
   ) -> napi::Result<()> {
-    // Acquire or create cached mapping
-    let (dst_ptr, dst_len, map_time_ms) = {
-      let mut cached = self
-        .cached
-        .lock()
-        .map_err(|_| napi::Error::from_reason("cached mutex poisoned"))?;
-      if let Some((_fd, ptr, len)) = cached.as_ref() {
-        // Reuse existing mapping
-        let t0 = std::time::Instant::now();
-        let _ = t0; // map_time_ms ~0
-        (*ptr, *len, 0.0)
-      } else {
-        // First time: create shm object and map
-        let t0 = std::time::Instant::now();
-        let shm_fd = shm_open(
-          self.name(),
-          OFlag::O_CREAT | OFlag::O_RDWR,
-          Mode::S_IRUSR | Mode::S_IWUSR,
-        )
-        .map_err(|e| napi::Error::from_reason(format!("Failed to open shared memory: {}", e)))?;
-
-        ftruncate(&shm_fd, self.size as i64).map_err(|e| {
-          napi::Error::from_reason(format!("Failed to truncate shared memory: {}", e))
-        })?;
-
-        let dst_size = NonZeroUsize::new(self.size as usize)
-          .ok_or_else(|| napi::Error::from_reason("Size must be non-zero"))?;
-
-        let raw_ptr = unsafe {
-          mmap(
-            None,
-            dst_size,
-            ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
-            MapFlags::MAP_SHARED,
-            shm_fd.as_fd(),
-            0,
-          )
-          .map_err(|e| napi::Error::from_reason(format!("Failed to mmap shared memory: {}", e)))?
-        };
-        let map_ms = t0.elapsed().as_secs_f64() * 1000.0;
-        let dst_ptr = raw_ptr.cast::<u8>();
-        *cached = Some((shm_fd, dst_ptr, dst_size.get()));
-        (dst_ptr, dst_size.get(), map_ms)
-      }
-    };
+    // Acquire (Linux: create once, then reuse) the cached mapping.
+    let (dst_ptr, dst_len, map_time_ms) = self
+      .ensure_object(false)?
+      .ok_or_else(|| napi::Error::from_reason("Failed to map shared memory"))?;
 
     let src_slice = buffer.as_ref();
     let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst_ptr.as_ptr() as *mut u8, dst_len) };
@@ -382,6 +437,8 @@ impl ShmGraphicBuffer {
         }
       }
     }
+
+    self.publish()?;
 
     if let Ok(mut t) = self.timings.lock() {
       *t = (map_time_ms, 0.0, 0.0); // convert time not split here
@@ -424,53 +481,10 @@ impl ShmGraphicBuffer {
       ));
     }
 
-    // Acquire or create cached mapping
-    let (dst_ptr, dst_len, map_time_ms) = {
-      let mut cached = self
-        .cached
-        .lock()
-        .map_err(|_| napi::Error::from_reason("cached mutex poisoned"))?;
-      if let Some((_fd, ptr, len)) = cached.as_ref() {
-        // Reuse existing mapping
-        let t0 = std::time::Instant::now();
-        let _ = t0; // map_time_ms ~0
-        (*ptr, *len, 0.0)
-      } else {
-        // First time: create shm object and map
-        let t0 = std::time::Instant::now();
-        let shm_fd = shm_open(
-          self.name(),
-          OFlag::O_CREAT | OFlag::O_RDWR,
-          Mode::S_IRUSR | Mode::S_IWUSR,
-        )
-        .map_err(|e| napi::Error::from_reason(format!("Failed to open shared memory: {}", e)))?;
-
-        ftruncate(&shm_fd, self.size as i64).map_err(|e| {
-          napi::Error::from_reason(format!("Failed to truncate shared memory: {}", e))
-        })?;
-
-        let dst_size = NonZeroUsize::new(self.size as usize)
-          .ok_or_else(|| napi::Error::from_reason("Size must be non-zero"))?;
-
-        let raw_ptr = unsafe {
-          mmap(
-            None,
-            dst_size,
-            ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
-            MapFlags::MAP_SHARED,
-            shm_fd.as_fd(),
-            0,
-          )
-          .map_err(|e| napi::Error::from_reason(format!("Failed to mmap shared memory: {}", e)))?
-        };
-        let map_ms = t0.elapsed().as_secs_f64() * 1000.0;
-        // mmap returns NonNull<c_void>; cast to NonNull<u8> for cached storage
-        let dst_ptr = raw_ptr.cast::<u8>();
-        // Store fd and ptr for reuse
-        *cached = Some((shm_fd, dst_ptr, dst_size.get()));
-        (dst_ptr, dst_size.get(), map_ms)
-      }
-    };
+    // Acquire (Linux: create once, then reuse) the cached mapping.
+    let (dst_ptr, dst_len, map_time_ms) = self
+      .ensure_object(false)?
+      .ok_or_else(|| napi::Error::from_reason("Failed to map shared memory"))?;
 
     let result = (|| -> napi::Result<()> {
       let t0 = std::time::Instant::now();
@@ -499,6 +513,7 @@ impl ShmGraphicBuffer {
           "Failed to convert texture to RGBA",
         ));
       }
+      self.publish()?;
       if let Ok(mut t) = self.timings.lock() {
         *t = (
           map_time_ms,
@@ -511,4 +526,29 @@ impl ShmGraphicBuffer {
 
     result
   }
+}
+
+/// Map `size` bytes of `fd` shared and read-write.
+fn map_fd(fd: &OwnedFd, size: u32) -> napi::Result<(NonNull<u8>, usize)> {
+  let dst_size = NonZeroUsize::new(size as usize)
+    .ok_or_else(|| napi::Error::from_reason("Size must be non-zero"))?;
+  let raw = unsafe {
+    mmap(
+      None,
+      dst_size,
+      ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
+      MapFlags::MAP_SHARED,
+      fd.as_fd(),
+      0,
+    )
+    .map_err(|e| napi::Error::from_reason(format!("Failed to mmap shared memory: {}", e)))?
+  };
+  Ok((raw.cast::<u8>(), dst_size.get()))
+}
+
+/// True while the segment name still exists, i.e. the terminal has not read
+/// (and thereby unlinked) it yet.
+#[cfg(target_os = "linux")]
+fn send_name_exists(name: &str) -> bool {
+  std::path::Path::new(&format!("/dev/shm{}", name)).exists()
 }

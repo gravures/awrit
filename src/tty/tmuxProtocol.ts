@@ -75,13 +75,18 @@ export function buildTmuxShmUploadCommands(
   width: number,
   height: number,
 ): { upload: string[]; placement: string } {
-  // f=32 raw RGBA — unlike f=100 it carries alpha natively, so no opaque/alpha
-  // branch is needed on the way in. a=t: transmit only; the virtual placement
-  // below plus the Unicode placeholders do the display.
+  // f=32 raw RGBA. a=t transfers only: it *creates* the image if it is absent and
+  // updates it otherwise, without displaying anything. a=T is deliberately not
+  // used -- transfer-and-display would also drop a copy at the cursor, which tmux
+  // then re-derives elsewhere in the window, leaving a ghost frame. The a=p
+  // placement below is what displays. t=s: unlink after read, so the terminal
+  // consumes the segment and the pool can rotate.
   const upload = [
     wrapTmuxPassthrough(GFX`a=t,i=${id},f=32,t=s,s=${width},v=${height},q=2;${nameBase64}`),
   ];
   // q=2 on both: tmux has no APC key handler and shreds replies into keystrokes.
+  // The Unicode placeholders position the image; x/y are omitted because on a
+  // placement they select a source-rectangle crop, not the destination cells.
   const placement = wrapTmuxPassthrough(GFX`a=p,i=${id},U=1,c=${cols},r=${rows},q=2`);
   return { upload, placement };
 }
