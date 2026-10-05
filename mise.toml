@@ -170,3 +170,10 @@ run = "cog bump --dry-run --auto --skip-untracked --disable-bump-commit"
 description = "output actual version tag"
 quiet = true
 run = "cog -v get-version --include-prereleases --tag"
+
+[tasks."version:bump"]
+description = "make CHANELOG.md, bump version and commit if in CI"
+env = { "GITHUB_WORKFLOW" = { required = "version bump only allowed in CI workflow" } }
+hide = true
+quiet = true
+run = "cog bump --auto"
