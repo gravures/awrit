@@ -1,7 +1,7 @@
 # Known Problems
 
-There are some problems I discovered during development. 
-And I don't think it has to do anything with crossterm but it has to do with how terminals handle ANSI or WinApi. 
+There are some problems I discovered during development.
+And I don't think it has to do anything with crossterm but it has to do with how terminals handle ANSI or WinApi.
 
 ## WinAPI
 
@@ -11,4 +11,4 @@ And I don't think it has to do anything with crossterm but it has to do with how
 
 ## UNIX-terminals
 
-The Arc and Manjaro KDE Konsole's are not seeming to resize the terminal instead they are resizing the buffer. 
+The Arc and Manjaro KDE Konsole's are not seeming to resize the terminal instead they are resizing the buffer.

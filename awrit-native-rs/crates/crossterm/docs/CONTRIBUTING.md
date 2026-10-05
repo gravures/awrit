@@ -35,7 +35,7 @@ to get proper grouping & sorting:
 * `cargo fmt` - fix ordering within the group
 
 Second step can be automated via _CLion_ -> _Preferences_ ->
-_Languages & Frameworks_ -> _Rust_ -> _Rustfmt_ -> _Run rustfmt on save_.  
+_Languages & Frameworks_ -> _Rust_ -> _Rustfmt_ -> _Run rustfmt on save_.
 
 ### Max Line Length
 
@@ -48,7 +48,7 @@ _Languages & Frameworks_ -> _Rust_ -> _Rustfmt_ -> _Run rustfmt on save_.
 100 is the [`max_width`](https://github.com/rust-lang/rustfmt/blob/master/Configurations.md#max_width)
 default value.
 
-120 is because of the GitHub. The editor & viewer width there is +- 123 characters. 
+120 is because of the GitHub. The editor & viewer width there is +- 123 characters.
 
 ### Warnings
 

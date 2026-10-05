@@ -2,7 +2,7 @@
 
 # Crossterm Examples
 
-The examples are compatible with the latest release.  
+The examples are compatible with the latest release.
 
 ## Structure
 

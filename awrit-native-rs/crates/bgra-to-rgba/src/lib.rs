@@ -112,7 +112,7 @@ unsafe fn bgra_to_rgba_chunk(src: &[u8], dst: &mut [u8]) { unsafe {
   // Shuffle pattern: B G R A -> R G B A
   #[rustfmt::skip]
   let shuffle = _mm256_setr_epi8(
-    2, 1, 0, 3, 
+    2, 1, 0, 3,
     6, 5, 4, 7,
     10, 9, 8, 11,
     14, 13, 12, 15,

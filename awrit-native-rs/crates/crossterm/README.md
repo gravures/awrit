@@ -1,4 +1,4 @@
-# Cross-platform Terminal Manipulation Library 
+# Cross-platform Terminal Manipulation Library
 
 Crossterm is a pure-rust, terminal manipulation library that makes it possible to write cross-platform text-based interfaces (see [features](#features)). It supports all UNIX and Windows terminals down to Windows 7 (not all terminals are tested,
 see [Tested Terminals](#tested-terminals) for more info).
@@ -26,7 +26,7 @@ see [Tested Terminals](#tested-terminals) for more info).
 - Few dependencies
 - Full control over writing and flushing output buffer
 - Is tty
-- Cursor 
+- Cursor
     - Move the cursor N times (up, down, left, right)
     - Move to previous / next line
     - Move to column
@@ -34,29 +34,29 @@ see [Tested Terminals](#tested-terminals) for more info).
     - Store the cursor position and restore to it later
     - Hide/show the cursor
     - Enable/disable cursor blinking (not all terminals do support this feature)
-- Styled output 
+- Styled output
     - Foreground color (16 base colors)
     - Background color (16 base colors)
     - 256 (ANSI) color support (Windows 10 and UNIX only)
     - RGB color support (Windows 10 and UNIX only)
     - Text attributes like bold, italic, underscore, crossed, etc
-- Terminal 
+- Terminal
     - Clear (all lines, current line, from cursor down and up, until new line)
     - Scroll up, down
     - Set/get the terminal size
     - Exit current process
     - Alternate screen
-    - Raw screen   
+    - Raw screen
     - Set terminal title
     - Enable/disable line wrapping
-- Event 
-    - Input Events 
+- Event
+    - Input Events
     - Mouse Events (press, release, position, button, drag)
     - Terminal Resize Events
     - Advanced modifier (SHIFT | ALT | CTRL) support for both mouse and key events and
     - futures Stream  (feature 'event-stream')
     - Poll/read API
-    
+
 <!--
 WARNING: Do not change following heading title as it's used in the URL by other crates!
 -->
@@ -122,7 +122,7 @@ fn main() -> std::io::Result<()> {
         .execute(SetBackgroundColor(Color::Red))?
         .execute(Print("Styled text here."))?
         .execute(ResetColor)?;
-    
+
     Ok(())
 }
 ```
@@ -134,7 +134,7 @@ Checkout this [list](https://docs.rs/crossterm/latest/crossterm/index.html#suppo
 ```toml
 [dependencies.crossterm]
 version = "0.27"
-features = ["event-stream"] 
+features = ["event-stream"]
 ```
 
 | Feature        | Description                                  |
@@ -146,7 +146,7 @@ features = ["event-stream"]
 | `derive-more`  | Adds `is_*` helper functions for event types |
 
 
-To use crossterm as a very thin layer you can disable the `events` feature or use `filedescriptor` feature. 
+To use crossterm as a very thin layer you can disable the `events` feature or use `filedescriptor` feature.
 This can disable `mio` / `signal-hook` / `signal-hook-mio` dependencies.
 
 ### Dependency Justification
@@ -177,9 +177,9 @@ This can disable `mio` / `signal-hook` / `signal-hook-mio` dependencies.
 - [Rusty-rain](https://github.com/cowboy8625/rusty-rain)
 
 ## Contributing
-  
+
 We highly appreciate when anyone contributes to this crate. Before you do, please,
-read the [Contributing](docs/CONTRIBUTING.md) guidelines. 
+read the [Contributing](docs/CONTRIBUTING.md) guidelines.
 
 ## Authors
 
