@@ -1,0 +1,172 @@
+[vars]
+electron_dir = "{{ [config_root, 'node_modules', 'electron'] | join_path }}"
+electron_path = "{{ [vars.electron_dir, 'path.txt' ] | join_path }}"
+electron_dist = "{{ [vars.electron_dir, 'dist' ] | join_path }}"
+electron_cache = "{{ [xdg_cache_home, 'electron'] | join_path }}"
+electron_plist = "{{ [vars.electron_dist, 'Electron.app', 'Contents', 'Info.plist' ] | join_path }}"
+
+[env]
+
+[tools]
+bun = "1.4.0"
+rust = "stable"
+pre-commit = "latest"
+cocogitto = "latest"
+
+[hooks]
+postinstall = { task = "postinstall" }
+
+[tasks.postinstall]
+quiet = true
+hide = true
+run = [
+  { task = "setup" },
+]
+
+##########################################################
+# Setup environment
+[tasks."setup"]
+description = "setup a developpment environment"
+quiet = true
+run = [
+  "{% if not env.GITHUB_WORKFLOW %} mise run 'pc:init' {% endif %}",
+  "bun install",
+  { task = "setup:verify-electron" },
+  { task = "setup:patch-electron" },
+]
+
+[tasks."setup:verify-electron"]
+description = "If bun's extract-zip failed fall back to `ouch`"
+quiet = true
+hide = true
+run = '''
+{% if vars.electron_path is not file %}
+  {% set cache = exec(command="find " ~ vars.electron_cache ~ " -name electron-*.zip -print -quit") %}
+  {% if cache %}
+    mise run setup:unzip-electron {{ cache }}
+  {% else %}
+    echo "failed to install electron"
+    exit 1
+  {% endif %}
+{% endif %}
+'''
+
+[tasks."setup:unzip-electron"]
+quiet = true
+hide = true
+tools."aqua:ouch-org/ouch" = "latest"
+usage = '''
+arg "<file>"
+'''
+run = '''
+ouch decompress {{ usage.file }} -d {{ vars.electron_dist }} -r -q -y
+printf 'electron' >{{ vars.electron_path }}
+'''
+
+[tasks."setup:patch-electron"]
+description = "on macos patch Electron.app to not display in the Dock"
+quiet = true
+hide = true
+run = '''
+{% if os() == "macos" %}
+  sed -i '' 's/<\/dict>/    <key>LSUIElement<\/key>\n    <true\/>\n<\/dict>/' {{ vars.electron_plist }} || true
+{% endif %}
+'''
+
+##########################################################
+# Dev commands
+[tasks."dev:format"]
+alias = "format"
+description = "check code formatting"
+quiet = true
+usage = '''
+arg "[files]" help="files to format" var=#true default="."
+flag "--write" help="format the file(s)" default=#false
+'''
+run = '''
+{% if usage.write %}
+  biome format --write {{ usage.files | join(sep=' ') }}
+{% else %}
+  biome check --linter-enabled=false --assist-enabled=false {{ usage.files | join(sep=' ') }}
+{% endif %}
+'''
+
+[tasks."dev:lint"]
+alias = "lint"
+description = "lint code"
+quiet = true
+usage = '''
+arg "[files]" help="files to lint" var=#true default="./src"
+flag "--write" help="apply safe fixes" default=#false
+flag "--unsafe" help="also apply unsafe fixes" default=#false
+'''
+run = '''
+{% if usage.write %}
+  {% if usage.unsafe %}
+    biome lint --write --unsafe {{ usage.files | join(sep=' ') }}
+  {% else %}
+    biome lint --write {{ usage.files | join(sep=' ') }}
+  {% endif %}
+{% else %}
+  biome lint {{ usage.files | join(sep=' ') }}
+{% endif %}
+'''
+
+[tasks."dev:typecheck"]
+alias = "typecheck"
+description = "verify typescript types"
+quiet = true
+run = "tsc --noEmit --skipLibCheck"
+
+[tasks."dev:test"]
+alias = "test"
+description = "run tests suite"
+quiet = true
+run = '''
+bun run ./src/tty/inputTest.ts
+bun run ./src/tty/graphicsTest.ts
+'''
+
+[tasks."dev:start"]
+alias = "start"
+description = "start [todo]"
+quiet = true
+run = "electron dist/index.cjs"
+
+##########################################################
+# Pre-commit
+[tasks."pc:init"]
+description = "initialize pre-commit"
+silent = "stdout"
+quiet = true
+run = "pre-commit install --install-hooks"
+
+[tasks."pc:update"]
+description = "update pre-commit hooks"
+depends = ["pc:init"]
+quiet = true
+run = "pre-commit autoupdate"
+
+[tasks."pc:check"]
+description = "run pre-commit hooks"
+depends = ["pc:init"]
+quiet = true
+run = "pre-commit run --all-files"
+
+[tasks."pc:clean"]
+description = "cleanup pre-commit hooks"
+depends = ["pc:init"]
+quiet = true
+run = ["pre-commit clean", "pre-commit gc"]
+
+##########################################################
+# Version
+[tasks."version:suggest"]
+description = "suggest next version tag"
+quiet = true
+run = "cog bump --dry-run --auto --skip-untracked --disable-bump-commit"
+
+[tasks."version:get"]
+description = "output actual version tag"
+quiet = true
+run = "cog -v get-version --include-prereleases --tag"

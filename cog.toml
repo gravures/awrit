@@ -1,0 +1,42 @@
+# Cocogitto config
+from_latest_tag = true
+ignore_merge_commits = true
+disable_changelog = false
+disable_bump_commit = false
+skip_ci = "[skip ci]"
+skip_untracked = true
+tag_prefix = "v"
+
+# branch_whitelist = ["main"]
+
+pre_bump_hooks = []
+post_bump_hooks = []
+
+generate_mono_repository_global_tag = false
+generate_mono_repository_package_tags = true
+pre_package_bump_hooks = []
+post_package_bump_hooks = []
+
+[commit_types]
+# feat*, fix*,  security*, build, ci, revert, docs, test, style, chore, perf*
+fix = { changelog_title = "Fixes", bump_patch = true }
+security = { changelog_title = "Security", bump_patch = true }
+perf = { changelog_title = "Performance", bump_patch = true }
+refactor = { changelog_title = "Refactoring", bump_patch = true }
+docs = { changelog_title = "Documentation", bump_patch = true }
+# Omit commits from changelog
+chore = { changelog_title = "", omit_from_changelog = true }
+ci = { changelog_title = "", omit_from_changelog = true }
+style = { changelog_title = "", omit_from_changelog = true }
+test = { changelog_title = "", omit_from_changelog = true }
+
+[changelog]
+path = "CHANGELOG.md"
+authors = [{ username = "gravures", signature = "Gilles Coissac" }]
+remote = "github.com"
+repository = "awrit"
+owner = "gravures"
+template = "changelog.tera"
+
+[bump_profiles]
+[git_hooks]

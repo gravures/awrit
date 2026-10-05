@@ -4,12 +4,15 @@
   "description": "A full graphical web browser for Kitty terminal with mouse and keyboard support",
   "main": "index.js",
   "author": "Chase Colman",
+  "mainteners": [
+    { "name": "Gilles Coissac", "email": "gilles@ideographe.fr" }
+  ],
   "license": "BSD-3-Clause",
-  "homepage": "https://github.com/chase/awrit",
+  "homepage": "https://github.com/gravures/awrit",
   "engines": {
     "node": ">=22.11.0"
   },
-  "workspaces": ["src/runner"],
+  "workspaces": [ "src/runner" ],
   "scripts": {
     "format": "biome format --write .",
     "lint": "biome lint ./src",
@@ -35,7 +38,7 @@
     "@types/sinonjs__fake-timers": "^8.1.5",
     "typescript": "^5.9.2"
   },
-  "trustedDependencies": ["@biomejs/biome", "@tailwindcss/oxide", "awrit-native-rs", "core-js", "electron", "esbuild"],
+  "trustedDependencies": [ "@biomejs/biome", "@tailwindcss/oxide", "awrit-native-rs", "core-js", "electron", "esbuild" ],
   "patchedDependencies": {
     "lru-cache@5.1.1": "patches/lru-cache@5.1.1.patch"
   }
