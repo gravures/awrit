@@ -5,3 +5,6 @@ out
 *.log*
 .bun
 awrit_error.txt
+lcov.info
+.lcov*
+coverage.xml
