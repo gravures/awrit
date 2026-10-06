@@ -23,11 +23,13 @@ run = [
   { task = "setup" },
 ]
 
+[settings]
+task.quiet = true
+
 ##########################################################
 # Setup environment
 [tasks."setup"]
 description = "setup a developpment environment"
-quiet = true
 run = [
   "{% if not env.GITHUB_WORKFLOW %} mise run 'pc:init' {% endif %}",
   "bun install",
@@ -37,7 +39,6 @@ run = [
 
 [tasks."setup:verify-electron"]
 description = "If bun's extract-zip failed fall back to `ouch`"
-quiet = true
 hide = true
 run = '''
 {% if vars.electron_path is not file %}
@@ -52,7 +53,6 @@ run = '''
 '''
 
 [tasks."setup:unzip-electron"]
-quiet = true
 hide = true
 tools."aqua:ouch-org/ouch" = "latest"
 usage = '''
@@ -65,7 +65,6 @@ printf 'electron' >{{ vars.electron_path }}
 
 [tasks."setup:patch-electron"]
 description = "on macos patch Electron.app to not display in the Dock"
-quiet = true
 hide = true
 run = '''
 {% if os() == "macos" %}
@@ -78,7 +77,6 @@ run = '''
 [tasks."dev:format"]
 alias = "format"
 description = "check code formatting"
-quiet = true
 usage = '''
 arg "[files]" help="files to format" var=#true default="."
 flag "--write" help="format the file(s)" default=#false
@@ -94,7 +92,6 @@ run = '''
 [tasks."dev:lint"]
 alias = "lint"
 description = "lint code"
-quiet = true
 usage = '''
 arg "[files]" help="files to lint" var=#true default="./src"
 flag "--write" help="apply safe fixes" default=#false
@@ -115,73 +112,88 @@ run = '''
 [tasks."dev:typecheck"]
 alias = "typecheck"
 description = "verify typescript types"
-quiet = true
 run = "tsc --noEmit --skipLibCheck"
-
-[tasks."dev:test"]
-alias = "test"
-description = "run tests suite"
-quiet = true
-run = '''
-bun run ./src/tty/inputTest.ts
-bun run ./src/tty/graphicsTest.ts
-'''
 
 [tasks."dev:start"]
 alias = "start"
 description = "start [todo]"
-quiet = true
 run = "electron dist/index.cjs"
+
+[tasks."dev:audit"]
+alias = "audit"
+description = "audit node installed packages for vulnerabilities"
+usage = '''
+arg "<level>" help="audit level" {
+  choices "low" "moderate" "high" "critical"
+  default "high"
+}
+flag "--show-fix" help="show available fixes" default=#false
+'''
+run = '''
+{% if usage.show_fix %}
+  bun audit fix --audit-level={{ usage.level }} --prod --dry-run
+{% else %}
+  bun audit --audit-level={{ usage.level }} --prod
+{% endif %}
+'''
+
+##########################################################
+# Tests
+[tasks."test:all"]
+alias = "test"
+description = "run the tests suite"
+run = "bun test"
+
+[tasks."test:input"]
+description = "run interactive input test"
+run = "bun run ./src/tty/inputTest.ts"
+
+[tasks."test:gfx"]
+description = "run graphics test"
+run = "bun run ./src/tty/graphicsTest.ts"
+
 
 ##########################################################
 # Pre-commit
 [tasks."pc:init"]
 description = "initialize pre-commit"
 silent = "stdout"
-quiet = true
 run = "pre-commit install --install-hooks"
 
 [tasks."pc:update"]
 description = "update pre-commit hooks"
 depends = ["pc:init"]
-quiet = true
 run = "pre-commit autoupdate"
 
 [tasks."pc:check"]
 description = "run pre-commit hooks"
 depends = ["pc:init"]
-quiet = true
 run = "pre-commit run --all-files"
 
 [tasks."pc:clean"]
 description = "cleanup pre-commit hooks"
 depends = ["pc:init"]
-quiet = true
 run = ["pre-commit clean", "pre-commit gc"]
 
 ##########################################################
 # Version
 [tasks."version:suggest"]
 description = "suggest next version tag"
-quiet = true
 run = "cog bump --dry-run --auto --skip-untracked --disable-bump-commit"
 
 [tasks."version:get"]
 description = "output actual version tag"
-quiet = true
 run = "cog -v get-version --include-prereleases --tag"
 
 [tasks."version:bump"]
 description = "make CHANELOG.md, bump version and commit if in CI"
 env = { "GITHUB_WORKFLOW" = { required = "version bump only allowed in CI workflow" } }
 hide = true
-quiet = true
 run = "cog bump --auto"
 
 [tasks."version:bump-pkg"]
 description = "bump version in package.json"
 hide = true
-quiet = true
 usage = '''
 arg "<version>"
 '''
