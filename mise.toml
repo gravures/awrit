@@ -177,3 +177,12 @@ env = { "GITHUB_WORKFLOW" = { required = "version bump only allowed in CI workfl
 hide = true
 quiet = true
 run = "cog bump --auto"
+
+[tasks."version:bump-pkg"]
+description = "bump version in package.json"
+hide = true
+quiet = true
+usage = '''
+arg "<version>"
+'''
+run = "bun pm version {{ usage.version }} --no-git-tag-version --force"
