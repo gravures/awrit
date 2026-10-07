@@ -4,6 +4,7 @@ electron_path = "{{ [vars.electron_dir, 'path.txt' ] | join_path }}"
 electron_dist = "{{ [vars.electron_dir, 'dist' ] | join_path }}"
 electron_cache = "{{ [xdg_cache_home, 'electron'] | join_path }}"
 electron_plist = "{{ [vars.electron_dist, 'Electron.app', 'Contents', 'Info.plist' ] | join_path }}"
+awrit_native_dir = "{{ [config_root, 'awrit-native-rs',] | join_path }}"
 
 [env]
 
@@ -36,6 +37,7 @@ description = "setup a developpment environment"
 run = [
   "{% if not env.GITHUB_WORKFLOW %} mise run 'pc:init' {% endif %}",
   "bun install",
+  { task = "setup:build" },
   { task = "setup:verify-electron" },
   { task = "setup:patch-electron" },
 ]
@@ -74,6 +76,15 @@ run = '''
   sed -i '' 's/<\/dict>/    <key>LSUIElement<\/key>\n    <true\/>\n<\/dict>/' {{ vars.electron_plist }} || true
 {% endif %}
 '''
+
+[tasks."setup:build"]
+description = "build awrit-native-rs package"
+dir = "{{ vars.awrit_native_dir }}"
+run = [
+  "bun napi build --platform --release",
+  "{% if not env.GITHUB_WORKFLOW %} ./run-shim scripts/fix-types.js {% endif %}",
+]
+
 
 ##########################################################
 # Dev commands
@@ -211,3 +222,11 @@ hide = true
 tools."pipx:genbadge[coverage]" = "latest"
 tools."pipx:lcov_cobertura" = "latest"
 run = "lcov_cobertura lcov.info && genbadge coverage -i coverage.xml -o assets/coverage.svg"
+
+##########################################################
+# Runner
+[tasks.awrit]
+usage = '''
+arg "[args]" var=#true help="any arguments to provide to awrit"
+'''
+run = "bun run {{ config_root }}/src/runner {{ usage.args | join(sep=' ') }} 2>{{ config_root }}/awrit_error.txt"
