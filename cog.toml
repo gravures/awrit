@@ -9,7 +9,7 @@ tag_prefix = "v"
 
 # branch_whitelist = ["main"]
 
-pre_bump_hooks = ["mise version:bump-pkg {{ version }}"]
+pre_bump_hooks = ["mise version:bump-pkg {{version}}"]
 post_bump_hooks = []
 
 generate_mono_repository_global_tag = false
