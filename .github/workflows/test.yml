@@ -1,0 +1,128 @@
+name: Test
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - '*.lock'
+      - 'awrit-native-rs/package.json'
+      - 'awrit-native-rs/Cargo.*'
+      - 'awrit-native-rs/src/**'
+      - 'awrit-native-rs/build.rs'
+      - 'awrit-native-rs/crates/**/*.rs'
+      - 'awrit-native-rs/src/Cargo.*'
+      - 'awrit-native-rs/crates/**/Cargo.*'
+      - '.github/workflows/CI.yml'
+  workflow_dispatch:
+
+jobs:
+  testing:
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: macos-latest
+            target: x86_64-apple-darwin
+            build: yarn ci --target x86_64-apple-darwin && rm awrit-native-rs.darwin-arm64.node
+          - host: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            build: yarn ci --target x86_64-unknown-linux-gnu
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            build: yarn ci --target aarch64-apple-darwin
+          - host: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            build: yarn ci --target aarch64-unknown-linux-gnu
+    name: stable - ${{ matrix.settings.target }}
+    runs-on: ${{ matrix.settings.host }}
+
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v4
+
+      - name: install mise
+        uses: jdx/mise-action@v4
+        with:
+          version: 2026.10.1
+          install: true
+          cache: true
+
+      - name: run tests suite with coverage
+        run: |
+          mise run typecheck
+          mise run test
+
+      - name: store coverage file
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: .coverage/lcov.info
+          include-hidden-files: true
+
+  coverage:
+    needs: [testing]
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
+      actions: read
+
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: gets coverage data
+        uses: actions/download-artifact@v4
+        id: download
+        with:
+          pattern: coverage
+          merge-multiple: false
+          path: artifacts
+
+      - name: verify artifacts
+        run: |
+          echo "Artifacts dir listing (if present):"
+          ls -la artifacts || true
+          echo "Coverage files found under artifacts:"
+          find artifacts -type f -name "lcov.info" -print || true
+
+      - name: move coverage files to repository root
+        shell: bash
+        run: |
+          find artifacts -type f -name "lcov.info" -exec mv -t . {} +
+
+      - name: Coverage Badge
+        shell: bash
+        run: |
+          pip install -U 'lcov_cobertura'
+          pip install -U 'genbadge[coverage]'
+          lcov_cobertura lcov.info && genbadge coverage -i coverage.xml -o assets/coverage.svg
+
+      - name: Verify Changed files
+        uses: tj-actions/verify-changed-files@v20
+        id: verify-changed-files
+        with:
+          files: assets/coverage.svg
+
+      - name: Commit coverage.svg
+        if: steps.verify-changed-files.outputs.files_changed == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add assets/coverage.svg
+          git commit -m "chore(coverage): Updated coverage.svg badge"
+
+      - name: Push changes
+        if: steps.verify-changed-files.outputs.files_changed == 'true'
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.github_token }}
+          branch: ${{ github.head_ref || github.ref_name }}
+
+

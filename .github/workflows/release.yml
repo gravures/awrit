@@ -1,0 +1,97 @@
+# This workflow will only run jobs after
+# the Test workflow completes with success on the main branch.
+name: Publish release
+on:
+  workflow_run:
+    workflows: [Test]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  bump:
+    name: Bump version, make changelog
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version_tag: ${{ steps.get_version.outputs.tag }}
+
+    steps:
+    - name: checkout repo
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: fetch all tags
+      run: |
+        git fetch --tags --force origin
+        git describe --tags --always
+
+    - name: install mise
+      uses: jdx/mise-action@v4
+      with:
+        version: 2026.10.1
+        install: true
+        cache: true
+
+    - name: configure git user
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: bump version, make changelog and commit
+      run: |
+        mise run ci:version-bump
+
+    - name: Push changes
+      uses: ad-m/github-push-action@master
+      with:
+        github_token: ${{ secrets.github_token }}
+        branch: ${{ github.head_ref || github.ref_name }}
+
+    - name: Push version tags
+      run: |
+        git push origin 'refs/tags/v*'
+
+    - name: get version tag
+      id: get_version
+      run: |
+        VERSION=$(git describe --tags --always)
+        echo "tag=${VERSION}" >> $GITHUB_OUTPUT
+
+    - name: upload changelog
+      uses: actions/upload-artifact@v4
+      with:
+        name: changelog
+        path: ${{ github.workspace }}/CHANGELOG.md
+
+
+  release:
+    name: Create GitHub Release
+    needs: [ bump ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: checkout repo
+      uses: actions/checkout@v4
+
+    - name: download changelog
+      uses: actions/download-artifact@v4
+      with:
+        name: changelog
+        path: ${{ github.workspace }}
+
+    - name: create github release
+      id: create_release
+      uses: softprops/action-gh-release@v2
+      with:
+        body_path: ${{ github.workspace }}/CHANGELOG.md
+        prerelease: ${{ (endsWith(needs.bump.outputs.version_tag, '-pre')) || (endsWith(needs.bump.outputs.version_tag, '-dev')) }}
+        draft: false
+        name: Release ${{ needs.bump.outputs.version_tag }}
+        tag_name: ${{ needs.bump.outputs.version_tag }}
+        token: ${{ secrets.GITHUB_TOKEN }}
