@@ -80,10 +80,18 @@ run = '''
 [tasks."setup:build"]
 description = "build awrit-native-rs package"
 dir = "{{ vars.awrit_native_dir }}"
-run = [
-  "bun napi build --platform --release",
-  "{% if not env.GITHUB_WORKFLOW %} ./run-shim scripts/fix-types.js {% endif %}",
-]
+env.BUILD_TARGET = { default = "" }
+run = '''
+{% if env.GITHUB_WORKFLOW %}
+  bun napi build --platform --release --target {{ env.BUILD_TARGET }}
+  {% if env.BUILD_TARGET == "x86_64-apple-darwin" %}
+    rm awrit-native-rs.darwin-arm64.node
+  {% endif %}
+{% else %}
+  bun napi build --platform --release
+  ./run-shim scripts/fix-types.js
+{% endif %}
+'''
 
 [tasks."setup:clean"]
 alias = "clean"

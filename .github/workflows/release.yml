@@ -13,6 +13,8 @@ jobs:
     name: Bump version, make changelog
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
+    env:
+      BUILD_TARGET: x86_64-unknown-linux-gnu
     permissions:
       contents: write
     outputs:
