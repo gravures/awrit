@@ -85,6 +85,29 @@ run = [
   "{% if not env.GITHUB_WORKFLOW %} ./run-shim scripts/fix-types.js {% endif %}",
 ]
 
+[tasks."setup:clean"]
+alias = "clean"
+description = "clean-up source tree from installed and generated artifacts"
+confirm = "this action is irreversible, continue?"
+run = [
+  # root
+  "rm -rf ./node_modules 2>/dev/null || :",
+  "rm -rf ./dist 2>/dev/null || :",
+  "rm -rf ./bun 2>/dev/null || :",
+  "rm -f ./awrit_error.txt 2>/dev/null || :",
+  # awrit-native-rs
+  "rm -rf ./awrit-native-rs/node_modules 2>/dev/null || :",
+  "rm -rf ./awrit-native-rs/target 2>/dev/null || :",
+  "rm -f ./awrit-native-rs/package-lock.json 2>/dev/null || :",
+  "rm -f ./awrit-native-rs/awrit-native-rs.linux-x64-gnu.node 2>/dev/null || :",
+  # crates
+  "rm -rf ./awrit-native-rs/crates/crossterm/target 2>/dev/null || :",
+  "rm -rf ./awrit-native-rs/crates/crossterm/Cargo.lock 2>/dev/null || :",
+  "rm -rf ./awrit-native-rs/crates/bgra-to-rgba/target 2>/dev/null || :",
+  # runner
+  "rm -rf ./src/runner/node_modules 2>/dev/null || :",
+]
+
 
 ##########################################################
 # Dev commands
