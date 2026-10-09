@@ -14,7 +14,9 @@ on:
       - 'awrit-native-rs/crates/**/*.rs'
       - 'awrit-native-rs/src/Cargo.*'
       - 'awrit-native-rs/crates/**/Cargo.*'
-      - '.github/workflows/CI.yml'
+      - '.github/workflows/test.yml'
+      - '.github/workflows/release.yml'
+      - 'mise.toml'
   workflow_dispatch:
 
 jobs:
@@ -34,7 +36,7 @@ jobs:
     name: stable - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     env:
-      BUILD_TARGET: ${{ matrix.target }}
+      BUILD_TARGET: ${{ matrix.settings.target }}
     permissions:
       contents: write
 
@@ -55,7 +57,7 @@ jobs:
           mise run test
 
       - name: store coverage file
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: matrix.settings.host == 'ubuntu-22.04'
         uses: actions/upload-artifact@v4
         with:
           name: coverage
