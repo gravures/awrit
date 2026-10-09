@@ -118,6 +118,16 @@ run = [
   "rm -rf ./src/runner/node_modules 2>/dev/null || :",
 ]
 
+[tasks."setup:zero"]
+alias = "zero"
+description = "uninstall all tools and clean build artiacts"
+run = '''
+{% set installed = exec(command="mise ls -l --no-header | awk '{print $1}'") | split(pat='\n')  %}
+{% if installed %}
+mise uninstall --dry-run {{ installed | join(sep=' ') }}
+{% endif %}
+mise clean
+'''
 
 ##########################################################
 # Dev commands
