@@ -219,6 +219,9 @@ impl ShmGraphicBuffer {
   /// is exactly when the previous frame has been consumed. Returns
   /// `Ok(false)` while the segment is still in flight, so the caller can pick
   /// another one instead of truncating a segment out from under a live read.
+  ///
+  /// On first use: `O_CREAT|O_EXCL` creates segment, mmap and cache fd+ptr.
+  /// On reuse: terminal has consumed (pool rotation), use cached mmap directly.
   #[napi]
   pub fn try_write(&self, buffer: Buffer, image_width: u32) -> napi::Result<bool> {
     let fd = match shm_open(
@@ -314,7 +317,10 @@ impl ShmGraphicBuffer {
   ) -> napi::Result<()> {
     // Acquire or create cached mapping
     let (dst_ptr, dst_len, map_time_ms) = {
-      let mut cached = self.cached.lock().map_err(|_| napi::Error::from_reason("cached mutex poisoned"))?;
+      let mut cached = self
+        .cached
+        .lock()
+        .map_err(|_| napi::Error::from_reason("cached mutex poisoned"))?;
       if let Some((_fd, ptr, len)) = cached.as_ref() {
         // Reuse existing mapping
         let t0 = std::time::Instant::now();
@@ -356,8 +362,7 @@ impl ShmGraphicBuffer {
     };
 
     let src_slice = buffer.as_ref();
-    let dst_slice =
-      unsafe { std::slice::from_raw_parts_mut(dst_ptr.as_ptr() as *mut u8, dst_len) };
+    let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst_ptr.as_ptr() as *mut u8, dst_len) };
 
     match dirty_rect {
       Some(rect) => {
@@ -421,7 +426,10 @@ impl ShmGraphicBuffer {
 
     // Acquire or create cached mapping
     let (dst_ptr, dst_len, map_time_ms) = {
-      let mut cached = self.cached.lock().map_err(|_| napi::Error::from_reason("cached mutex poisoned"))?;
+      let mut cached = self
+        .cached
+        .lock()
+        .map_err(|_| napi::Error::from_reason("cached mutex poisoned"))?;
       if let Some((_fd, ptr, len)) = cached.as_ref() {
         // Reuse existing mapping
         let t0 = std::time::Instant::now();
@@ -492,7 +500,11 @@ impl ShmGraphicBuffer {
         ));
       }
       if let Ok(mut t) = self.timings.lock() {
-        *t = (map_time_ms, t2 - map_time_ms, t0.elapsed().as_secs_f64() * 1000.0 - t2);
+        *t = (
+          map_time_ms,
+          t2 - map_time_ms,
+          t0.elapsed().as_secs_f64() * 1000.0 - t2,
+        );
       }
       Ok(())
     })();

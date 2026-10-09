@@ -89,8 +89,8 @@ run = '''
   {% endif %}
 {% else %}
   bun napi build --platform --release
-  ./run-shim scripts/fix-types.js
 {% endif %}
+  bun scripts/fix-types.js
 '''
 
 [tasks."setup:clean"]
@@ -107,6 +107,8 @@ run = [
   "rm -rf ./awrit-native-rs/node_modules 2>/dev/null || :",
   "rm -rf ./awrit-native-rs/target 2>/dev/null || :",
   "rm -f ./awrit-native-rs/package-lock.json 2>/dev/null || :",
+  "rm -f ./awrit-native-rs/index.js 2>/dev/null || :",
+  "rm -f ./awrit-native-rs/index.d.ts 2>/dev/null || :",
   "rm -f ./awrit-native-rs/awrit-native-rs.linux-x64-gnu.node 2>/dev/null || :",
   # crates
   "rm -rf ./awrit-native-rs/crates/crossterm/target 2>/dev/null || :",

@@ -1,6 +1,5 @@
 {
   "name": "awrit-native-rs",
-  "version": "2.0.3",
   "main": "index.js",
   "types": "index.d.ts",
   "license": "BSD-3-Clause",
@@ -13,14 +12,9 @@
       "aarch64-unknown-linux-gnu"
     ]
   },
-  "devDependencies": {
-    "@napi-rs/cli": "^3.1.5"
-  },
   "scripts": {
-    "postinstall": "./run-shim scripts/download-binary.js",
-    "artifacts": "napi artifacts",
-    "make": "napi build --platform --release && ./run-shim scripts/fix-types.js",
-    "ci": "napi build --platform --release",
-    "make:debug": "napi build --platform"
+    "make": "napi build --platform --release && bun scripts/fix-types.js",
+    "ci": "napi build --platform --release && bun scripts/fix-types.js",
+    "make:debug": "napi build --platform && bun scripts/fix-types.js"
   }
 }
