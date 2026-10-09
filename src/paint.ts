@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { getWindowSize, pinTexture, ShmGraphicBuffer, unpinTexture } from 'awrit-native-rs';
+import { getWindowSize, pinTexture, ShmGraphicBuffer, unpinTexture } from './native';
 import type { BrowserWindow, NativeImage, Rectangle } from 'electron';
 import { screen } from 'electron';
 import { abort } from './abort';

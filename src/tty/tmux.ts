@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { console_ } from '../console';
-import { isTmux } from 'awrit-native-rs';
+import { isTmux } from '../native';
 
 type TmuxPaneSize = {
   cols: number;

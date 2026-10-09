@@ -6,7 +6,7 @@ import { console_ } from './console';
 // Load the REAL native module first: bun's module mocks persist across test
 // files, so tmuxProtocol.test (which wraps with the real passthrough) may run
 // against this mock — spreading real exports keeps it correct.
-const native = await import('awrit-native-rs');
+const native = await import('./native');
 
 class FakeShmBuffer {
   static instances: FakeShmBuffer[] = [];
@@ -35,7 +35,7 @@ class FakeShmBuffer {
 // the slow read consumed the pin.
 const pins = { next: 1, live: new Set<number>(), releasedBeforeWrite: [] as number[] };
 
-mock.module('awrit-native-rs', () => ({
+mock.module('./native', () => ({
   ...native,
   isTmux: () => false,
   getWindowSize: () => ({ cols: 100, rows: 30, width: 800, height: 600 }),

@@ -1,4 +1,4 @@
-import { listenForInput, type TermEvent } from 'awrit-native-rs';
+import { listenForInput, type TermEvent } from '../native';
 import * as out from './output';
 
 let quitListening = () => {};

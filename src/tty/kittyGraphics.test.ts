@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import type { ShmGraphicBuffer } from 'awrit-native-rs';
+import type { ShmGraphicBuffer } from '../native';
 import { gfxAck, gfxInFlight, paintImage, paintInitialFrame } from './kittyGraphics';
 import { flushBucket, __setPerfEnabledForTest } from '../perf';
 

@@ -1,4 +1,4 @@
-import { getWindowSize, type KeyEvent as KeyEventOriginal, type TermEvent } from 'awrit-native-rs';
+import { getWindowSize, type KeyEvent as KeyEventOriginal, type TermEvent } from './native';
 import { handleEvent as handleKeyBinding } from './keybindings';
 import { perfCount, perfEnd, perfTime } from './perf';
 import {

@@ -5,7 +5,7 @@ import {
   type TermEvent,
   termDisableFeatures,
   getWindowSize,
-} from 'awrit-native-rs';
+} from './native';
 import * as out from './tty/output';
 import { handleInput } from './inputHandler';
 import { createWindowWithToolbar } from './windows';

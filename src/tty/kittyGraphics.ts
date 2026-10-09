@@ -2,7 +2,7 @@ import { GFX } from './escapeCodes';
 import type { Rect, Size } from './graphics';
 import { options } from '../args';
 import { perfEnabled, perfEnd, perfPending, perfTime, perfValue } from '../perf';
-import type { ShmGraphicBuffer } from 'awrit-native-rs';
+import type { ShmGraphicBuffer } from '../native';
 import { placeCursor } from './output';
 import { isTmuxSession } from './tmux';
 const { stdout } = process;

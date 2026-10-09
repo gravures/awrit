@@ -1,4 +1,4 @@
-import type { getWindowSize } from 'awrit-native-rs';
+import type { getWindowSize } from '../native';
 
 export type MouseCoordinateMode = 'unknown' | 'cell' | 'pixel';
 

@@ -1,4 +1,4 @@
-import type { KeyEvent, TermEvent } from 'awrit-native-rs';
+import type { KeyEvent, TermEvent } from './native';
 import type { WindowView } from './windows';
 
 const isMac = process.platform === 'darwin';
@@ -50,7 +50,7 @@ function parseKeyBinding(binding: string): string[] {
         const mods = special.split('-');
         let lastPart = mods[mods.length - 1].toLowerCase();
 
-        // Normalize special key names to match awrit-native-rs
+        // Normalize special key names to match the native addon (src/native.ts)
         switch (lastPart) {
           case 'cr':
           case 'enter':

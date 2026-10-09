@@ -18,7 +18,7 @@ import {
   getWindowSize as rawGetWindowSize,
   ShmGraphicBuffer,
   type WindowSize,
-} from 'awrit-native-rs';
+} from './native';
 import { loadZoomState, getZoomFactor, setZoomFactor, saveZoomState } from './zoom-state';
 
 export function getWindowSize() {

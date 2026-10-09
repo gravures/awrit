@@ -1,6 +1,6 @@
 import { GFX } from './escapeCodes';
 import { ROW_COLUMN_DIACRITICS } from './rowColumnDiacritics';
-import { wrapTmuxPassthrough } from 'awrit-native-rs';
+import { wrapTmuxPassthrough } from '../native';
 
 export const TMUX_IMAGE_PLACEHOLDER = '\u{10eeee}';
 const DEFAULT_CHUNK_BYTES = 3072; // 4096 base64 chars
