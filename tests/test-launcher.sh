@@ -9,16 +9,17 @@ FAKE_BIN="$TEMP_DIR/bin"
 OPEN_LOG="$TEMP_DIR/open.log"
 BUN_LOG="$TEMP_DIR/bun.log"
 BUN_DIRECT_LOG="$TEMP_DIR/bun-direct.log"
+BUN_FALLBACK_LOG="$TEMP_DIR/bun-fallback.log"
+FAKE_BUN_DIR="$TEMP_DIR/fakebun"
 TMUX_LOG="$TEMP_DIR/tmux.log"
 PASSED=0
 FAILED=0
 
-cleanup() { rm -rf "$TEMP_DIR"; }
-trap cleanup EXIT
+trap 'rm -rf "$TEMP_DIR"' EXIT
 pass() { printf 'ok - %s\n' "$1"; PASSED=$((PASSED + 1)); }
 fail() { printf 'not ok - %s\n' "$1"; FAILED=$((FAILED + 1)); }
 
-mkdir -p "$COPY/.bun/bin" "$COPY/node_modules" "$COPY/src/runner" "$FAKE_BIN"
+mkdir -p "$FAKE_BUN_DIR/bin" "$COPY/node_modules" "$COPY/src/runner" "$FAKE_BIN"
 cp "$ROOT/awrit" "$COPY/awrit"
 chmod +x "$COPY/awrit"
 
@@ -47,7 +48,13 @@ if [[ "$command" == "show-options" ]]; then
   fi
 fi
 EOF
-cat >"$COPY/.bun/bin/bun" <<'EOF'
+cat >"$FAKE_BIN/mise" <<EOF
+#!/usr/bin/env bash
+if [[ -n "\${AWRIT_TEST_MISE_FAIL:-}" ]]; then exit 1; fi
+if [[ "\$*" == *"which bun"* ]]; then echo "$FAKE_BUN_DIR/bin/bun"; exit 0; fi
+exit 1
+EOF
+cat >"$FAKE_BUN_DIR/bin/bun" <<'EOF'
 #!/usr/bin/env bash
 {
   printf 'TMUX=%s\nTMUX_PANE=%s\nPWD=%s\n' "${TMUX-unset}" "${TMUX_PANE-unset}" "$PWD"
@@ -55,7 +62,9 @@ cat >"$COPY/.bun/bin/bun" <<'EOF'
 } >"$AWRIT_TEST_BUN_LOG"
 exit "${AWRIT_TEST_BUN_EXIT:-0}"
 EOF
-chmod +x "$FAKE_BIN/open" "$FAKE_BIN/tmux" "$COPY/.bun/bin/bun"
+# PATH fallback fake — used when mise cannot resolve bun
+cp "$FAKE_BUN_DIR/bin/bun" "$FAKE_BIN/bun"
+chmod +x "$FAKE_BIN/open" "$FAKE_BIN/tmux" "$FAKE_BIN/mise" "$FAKE_BUN_DIR/bin/bun" "$FAKE_BIN/bun"
 
 workdir="$TEMP_DIR/project with spaces"
 mkdir -p "$workdir"
@@ -83,7 +92,7 @@ fi
 
 : >"$TMUX_LOG"
 (
-  cd "$workdir"
+  cd "$workdir" || exit
   PATH="$FAKE_BIN:/usr/bin:/bin" TMUX=/tmp/tmux TMUX_PANE=%42 \
     AWRIT_TEST_BUN_EXIT=7 AWRIT_TEST_BUN_LOG="$BUN_LOG" AWRIT_TEST_TMUX_LOG="$TMUX_LOG" \
     "$COPY/awrit" --help >/dev/null
@@ -160,10 +169,20 @@ else
   fail "direct launch keeps the existing Bun runner contract"
 fi
 
-if bash -n "$ROOT/awrit" "$ROOT/docs/get"; then
-  pass "launcher and installer parse as Bash"
+if PATH="$FAKE_BIN:/usr/bin:/bin" AWRIT_TEST_MISE_FAIL=1 AWRIT_TEST_BUN_LOG="$BUN_FALLBACK_LOG" \
+    env -u TMUX -u TMUX_PANE "$COPY/awrit" --help >/dev/null \
+  && grep -Fxq '<run>' "$BUN_FALLBACK_LOG" \
+  && grep -Fxq "<$COPY/src/runner>" "$BUN_FALLBACK_LOG" \
+  && grep -Fxq '<--help>' "$BUN_FALLBACK_LOG"; then
+  pass "bun falls back to PATH when mise cannot resolve it"
 else
-  fail "launcher and installer parse as Bash"
+  fail "bun falls back to PATH when mise cannot resolve it"
+fi
+
+if bash -n "$ROOT/awrit"; then
+  pass "launcher parses as Bash"
+else
+  fail "launcher parses as Bash"
 fi
 
 printf 'Results: %s passed, %s failed\n' "$PASSED" "$FAILED"

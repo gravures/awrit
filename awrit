@@ -16,10 +16,27 @@ resolve_link() {
 
 BASE_DIR=$(cd -- "$(dirname -- "$(resolve_link "${BASH_SOURCE:-$0}")")" &>/dev/null && pwd)
 if [ ! -d "$BASE_DIR/node_modules" ]; then
-  "$BASE_DIR/setup.sh"
+  echo "awrit: development checkout not installed — run 'mise install'" >&2
+  exit 1
 fi
 
-BUN="$BASE_DIR/.bun/bin/bun"
+# Resolve the project's pinned bun through mise first: `mise which bun` prints the
+# executable that mise.toml pins, and `-C "$BASE_DIR"` makes it honor this checkout.
+# `.bun/bin/bun` was a setup.sh artifact that no longer exists; `bun` on PATH is
+# the fallback for shells where mise is unavailable.
+BUN=""
+if command -v mise >/dev/null 2>&1; then
+  if mise_bun="$(mise -C "$BASE_DIR" which bun 2>/dev/null)" && [ -x "$mise_bun" ]; then
+    BUN="$mise_bun"
+  fi
+fi
+if [ -z "$BUN" ] && command -v bun >/dev/null 2>&1; then
+  BUN="$(command -v bun)"
+fi
+if [ -z "$BUN" ]; then
+  echo "awrit: bun not found — run 'mise install'" >&2
+  exit 1
+fi
 echo "shim" "$@" >"$BASE_DIR/awrit_error.txt"
 
 restore_tmux_passthrough() {

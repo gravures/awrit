@@ -101,7 +101,7 @@ run = [
   # root
   "rm -rf ./node_modules 2>/dev/null || :",
   "rm -rf ./dist 2>/dev/null || :",
-  "rm -rf ./bun 2>/dev/null || :",
+  "rm -rf ./.bun 2>/dev/null || :",
   "rm -f ./awrit_error.txt 2>/dev/null || :",
   # awrit-native-rs
   "rm -rf ./awrit-native-rs/node_modules 2>/dev/null || :",

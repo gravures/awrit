@@ -5,7 +5,8 @@ Terminal web browser via Kitty graphics protocol with tmux passthrough support. 
 
 ## Quick commands
 - Run: `./awrit [url]`  — launcher script handles tmux setup & bun boot.
-- Dev setup: `bash setup.sh` — installs Bun to `.bun/`, installs deps, patches Electron.
+- Dev setup: `mise install` installs the tools (bun, rust) and then — via the `postinstall` hook in `mise.toml` — runs the `setup` task (deps, native addon build, Electron verify/patch), so it is also a valid cold-start entry point; `mise run setup` runs that task directly. Cold start: `mise run setup:clean && mise run setup`.
+- Preferred interface: `mise run test|lint|typecheck|format` (task aliases); direct `bun test` etc. work too.
 - Tests: `bun test && bash tests/test-launcher.sh`  — unit tests + launcher integration.
 - Single test: `bun test src/keybindings.test.ts`
 - Lint/format: `biome lint ./src` ; `biome lint --write ./src` ; `biome format --write .`
@@ -47,8 +48,7 @@ Terminal web browser via Kitty graphics protocol with tmux passthrough support. 
 - Config: `./config.js`
 - Zoom state: `~/.local/share/awrit/zoom-state.json` per origin.
 - Build output: `dist/`
-- Native module: `awrit-native-rs/`
-- Docs get script: `docs/get`
+- Native module: `awrit-native-rs/` — source-tree component (not an npm package); resolved via `src/native.ts`, installed/built by `mise run setup`. Launcher resolves bun via `mise -C <repo> which bun` (returns the pinned executable), falling back to `bun` on PATH.
 
 ## Conventions
 - Do not change `awrit` passthrough restore logic — must fail closed.
