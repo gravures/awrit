@@ -44,19 +44,16 @@ set -gq allow-passthrough on
 set -g mouse on
 ```
 
-The launcher temporarily promotes only its own pane to `allow-passthrough all`
-while Awrit is running, which lets the native renderer clean up its exact image
+`awrit` temporarily promotes only its own pane to `allow-passthrough all`
+while it is running, which lets the native renderer clean up its exact image
 IDs even if the pane is hidden. It restores the pane's previous value on exit;
 other panes remain on the safer global `on` setting. If pointer coordinates are
 detected incorrectly, set
 `AWRIT_TMUX_MOUSE_COORDS=cell` or `AWRIT_TMUX_MOUSE_COORDS=pixel` explicitly.
 
-The launcher regression test stays headless and verifies that tmux launches
-remain in the current pane:
-
-```bash
-bash tests/test-launcher.sh
-```
+Awrit's tmux behaviour is covered by automated tests that run without a real
+tmux session (`bun test`). They check that awrit stays in the pane it was
+launched from and restores that pane's `allow-passthrough` value when it exits.
 
 For more options look at the help:
 

@@ -102,7 +102,6 @@ run = [
   "rm -rf ./node_modules 2>/dev/null || :",
   "rm -rf ./dist 2>/dev/null || :",
   "rm -rf ./.bun 2>/dev/null || :",
-  "rm -f ./awrit_error.txt 2>/dev/null || :",
   # awrit-native-rs
   "rm -rf ./awrit-native-rs/node_modules 2>/dev/null || :",
   "rm -rf ./awrit-native-rs/target 2>/dev/null || :",
@@ -272,4 +271,4 @@ run = "lcov_cobertura lcov.info && genbadge coverage -i coverage.xml -o assets/c
 usage = '''
 arg "[args]" var=#true help="any arguments to provide to awrit"
 '''
-run = "bun run {{ config_root }}/src/runner {{ usage.args | join(sep=' ') }} 2>{{ config_root }}/awrit_error.txt"
+run = "bun run {{ config_root }}/src/runner {{ usage.args | join(sep=' ') }}"
