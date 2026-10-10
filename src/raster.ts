@@ -4,7 +4,7 @@
  * The terminal stretches the bitmap back over the same number of cells, so
  * rasterScale 2 renders a quarter of the pixels at half the size and lets the
  * terminal upscale — cheaper encode, larger text, softer edges. The trade is
- * the user's (config.js `rasterScale`); 1 is the untouched 1:1 behaviour.
+ * the user's (config.toml `rasterScale`); 1 is the untouched 1:1 behaviour.
  */
 let scale = 1;
 

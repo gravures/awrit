@@ -14,6 +14,7 @@ import { options } from './args';
 import { features } from './features';
 import { clearPlacements, gfxAck } from './tty/kittyGraphics';
 import { loadKeyBindings } from './keybindings';
+import { actions } from './actions';
 import { getForcedTmuxMouseCoordinateMode } from './tty/mouseCoordinates';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -30,45 +31,45 @@ try {
   // non-Linux or permission — process.title still covers ps on other platforms
 }
 
+import {
+  RESOLVED_CONFIG_ENV,
+  defaultResolvedConfigJsonPath,
+  normalizeConfig,
+  type AwritConfig,
+} from './config';
+
 let homepage = 'https://github.com/chase/awrit';
 
-function loadConfig(config: typeof import('../config.js') & { sharedTexture?: boolean }) {
-  if (config.homepage) homepage = config.homepage;
-  if (config.rasterScale != null) setRasterScale(config.rasterScale);
-  if (config.sharedTexture != null) setSharedTexture(config.sharedTexture);
-  if (config.keybindings) {
-    if (process.platform === 'darwin') {
-      Object.assign(config.keybindings, config.keybindings.mac);
-      config.keybindings.linux = undefined;
-    } else {
-      Object.assign(config.keybindings, config.keybindings.linux);
-      config.keybindings.mac = undefined;
-    }
-    loadKeyBindings(config);
+// The runner resolves, parses and normalizes the TOML config and writes it as
+// JSON (09-04 option-a); this side only reads that JSON, applies it and
+// re-reads it when it changes.
+function loadConfig(config: AwritConfig) {
+  homepage = config.homepage;
+  setRasterScale(config.rasterScale);
+  setSharedTexture(config.sharedTexture);
+  const { unknown } = loadKeyBindings({ keybindings: config.keybindings }, actions);
+  for (const name of unknown) {
+    console_.error(`Unknown keybinding action: "${name}"`);
   }
 }
 
-const CONFIG_PATH = '../config.js';
-const CONFIG_PATH_RESOLVED = path.resolve(__dirname, CONFIG_PATH);
-loadConfig(require(CONFIG_PATH_RESOLVED));
-
-function reloadConfig() {
-  const oldConfig = require(CONFIG_PATH_RESOLVED);
-  require.cache[CONFIG_PATH_RESOLVED] = undefined;
-
+function readResolvedConfig(): AwritConfig | null {
+  const p = process.env[RESOLVED_CONFIG_ENV] ?? defaultResolvedConfigJsonPath();
   try {
-    const newConfig = require(CONFIG_PATH_RESOLVED);
-    loadConfig(newConfig);
+    const txt = fs.readFileSync(p, 'utf8');
+    return normalizeConfig(JSON.parse(txt)).config;
   } catch (e) {
-    console_.error('Error loading config:', e);
-    // Restore old config if new one fails
-    try {
-      loadConfig(oldConfig);
-    } catch (e) {
-      console_.error('Error restoring old config:', e);
-    }
+    console_.error('Error reading resolved config:', e);
+    return null;
   }
 }
+
+// A missing/broken resolved config falls back to the declared defaults, so a
+// first start without JSON still has a working homepage and keybindings.
+let lastGoodConfig: AwritConfig = readResolvedConfig() ?? normalizeConfig({}).config;
+loadConfig(lastGoodConfig);
+
+const resolvedConfigPath = process.env[RESOLVED_CONFIG_ENV] ?? defaultResolvedConfigJsonPath();
 
 let configReloadTimer: ReturnType<typeof setTimeout> | undefined;
 function scheduleConfigReload() {
@@ -79,20 +80,34 @@ function scheduleConfigReload() {
   }, 300);
 }
 
-// fs.watch is event-driven; watchFile polls every 1000ms by comparison.
+function reloadConfig() {
+  const cfg = readResolvedConfig();
+  if (!cfg) return; // read/parse failed (reason already reported) — keep last good
+  try {
+    loadConfig(cfg);
+    lastGoodConfig = cfg;
+  } catch (e) {
+    console_.error('Error applying config, keeping last good:', e);
+    loadConfig(lastGoodConfig);
+  }
+}
+
+// Watch the resolved JSON (written by runner). Also watch the env path if it changes.
 try {
-  // Watch the directory, not the file: editors that save via rename-replace
-  // leave a file-level inotify watch pointing at the deleted inode.
-  const configName = path.basename(CONFIG_PATH_RESOLVED);
-  fs.watch(path.dirname(CONFIG_PATH_RESOLVED), (_event, filename) => {
-    if (filename === configName) scheduleConfigReload();
+  const dir = path.dirname(resolvedConfigPath);
+  fs.watch(dir, (_event, filename) => {
+    if (filename && path.basename(resolvedConfigPath) === filename) {
+      scheduleConfigReload();
+    }
   });
 } catch (e) {
   console_.error('fs.watch unavailable, falling back to fs.watchFile:', e);
-  fs.watchFile(CONFIG_PATH_RESOLVED, { interval: 1000 }, (curr, prev) => {
-    if (curr.mtime <= prev.mtime) return;
-    reloadConfig();
-  });
+  try {
+    fs.watchFile(resolvedConfigPath, { interval: 1000 }, (curr, prev) => {
+      if (curr.mtime <= prev.mtime) return;
+      reloadConfig();
+    });
+  } catch {}
 }
 
 // Don't show a dialog box on uncaught errors

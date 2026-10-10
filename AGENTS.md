@@ -23,7 +23,8 @@ Terminal web browser via Kitty graphics protocol with tmux passthrough support. 
   - `mouseCoordinates.ts` — cell vs pixel normalization. Override via env `AWRIT_TMUX_MOUSE_COORDS=cell|pixel`.
 - Rust native: `awrit-native-rs/` NAPI bindings for terminal I/O, tmux passthrough, shared memory.
 - Paint flow: `src/paint.ts` routes Electron paint events to `TmuxRenderer` or `kittyGraphics.ts`.
-- Config hot-reload: root `config.js` — homepage + keybindings. Changes propagate to running instance.
+- Config hot-reload: `config.toml` — resolved by the runner (`--config` → `./config.toml` → `$XDG_CONFIG_HOME/awrit/config.toml`, generated on first start); TOML is parsed in the runner and handed to Electron as JSON via `AWRIT_CONFIG_JSON`. Changes to the active file propagate without restart; invalid edits keep the last good config and log the reason.
+- Config machinery: `src/config.ts` (option schema, defaults, TOML generator, validation) and `src/runner/config.ts` (resolve, parse, write the JSON); `src/actions.ts` is the keybinding action registry that config names reference.
 
 ## tmux requirements
 - tmux 3.4+ with `allow-passthrough on` and `mouse on`.
@@ -47,7 +48,7 @@ Terminal web browser via Kitty graphics protocol with tmux passthrough support. 
 ## Important paths
 - Entry point: `src/runner/index.ts` (dev: `mise run awrit`; release: the compiled `awrit` binary at the tarball root)
 - Launch contract: `src/runner/launch.ts` — install root, tmux passthrough, error sink; tested by `src/runner/launch.test.ts`
-- Config: `./config.js`
+- Config: `src/config.ts` (schema + defaults); active file `./config.toml` or `$XDG_CONFIG_HOME/awrit/config.toml` (generated on first start)
 - Zoom state: `~/.local/share/awrit/zoom-state.json` per origin.
 - Logs: `$XDG_STATE_HOME/awrit/awrit.log` (fallback `~/.local/state/awrit/awrit.log`)
 - Build output: `dist/`
@@ -57,7 +58,7 @@ Terminal web browser via Kitty graphics protocol with tmux passthrough support. 
 - Do not change the tmux passthrough restore logic in `src/runner/launch.ts` — must fail closed.
 - Keep tmux and non-tmux code paths parallel; do not delete native Kitty path.
 - Biome is authoritative over ESLint. Do not add new linter configs.
-- Changes to `config.js` are live-reloaded; require cache is cleared.
+- Config changes to the resolved `config.toml` are live-reloaded; invalid edits preserve the last good config.
 
 ## Constraints from repo
 - Node engine >=22.11.0 enforced in package.json.

@@ -21,7 +21,7 @@ import { getPaneSize, isTmuxSession } from './tty/tmux';
 import { FrameCoalescer } from './tty/frameCoalescer';
 import { TmuxRenderer } from './tty/tmuxRenderer';
 
-/** Shared-texture paint path gate (06-06). Default on; config.js can disable. */
+/** Shared-texture paint path gate (06-06). Default on; config.toml can disable. */
 let sharedTextureEnabled = true;
 export function setSharedTexture(value: unknown): void {
   const v = typeof value === 'boolean' ? value : true;

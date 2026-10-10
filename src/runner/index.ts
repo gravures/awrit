@@ -1,10 +1,12 @@
 import fs from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { $, type Subprocess } from 'bun';
 import { options, possibleOptions } from '../args';
+import { RESOLVED_CONFIG_ENV } from '../config';
 import { getDisplayScale } from '../dpi';
 import { colorsToTailwind, queryColors } from './kittyColors';
 import { beginLaunch, fatal, logDiagnostic, resolveRoot } from './launch';
+import { loadConfig } from './config';
 
 const { stdout } = process;
 
@@ -158,6 +160,60 @@ if (isDev) {
   stopDevServer = () => server.close();
 }
 
+// Load and resolve config (09-04, option-a). The runner parses TOML and writes
+// normalized JSON for Electron; Electron reads via AWRIT_CONFIG_JSON.
+let configJsonPath: string;
+let configPath: string;
+let lastSeenConfigMtime = 0;
+try {
+  const res = loadConfig({
+    cwd: process.cwd(),
+    argvConfig: options.config,
+  });
+  configJsonPath = res.jsonPath;
+  configPath = res.configPath;
+  lastSeenConfigMtime = fs.statSync(configPath).mtimeMs;
+  for (const key of res.unknownKeys) {
+    logDiagnostic(`config: ignoring unknown option "${key}" in ${res.configPath}`);
+  }
+} catch (e) {
+  fatal((e as Error).message);
+}
+
+// Hot-reload: watch the config DIRECTORY, not the file — editors that save via
+// rename-replace (and our own tmp+rename of the JSON) leave a file-level watch
+// pointing at a deleted inode. The mtime check keeps unrelated changes in the
+// same directory from being parsed, and an invalid file is attempted once per
+// edit: the last good config stays active and the reason is logged.
+try {
+  const configDir = dirname(configPath);
+  const configName = basename(configPath);
+  fs.watch(configDir, (_event, filename) => {
+    if (filename && filename !== configName) return;
+    let mtime: number;
+    try {
+      mtime = fs.statSync(configPath).mtimeMs;
+    } catch {
+      return; // mid-save rename; the next event sees the new file
+    }
+    if (mtime === lastSeenConfigMtime) return;
+    lastSeenConfigMtime = mtime;
+    try {
+      const res = loadConfig({
+        cwd: process.cwd(),
+        argvConfig: options.config,
+      });
+      configJsonPath = res.jsonPath;
+      logDiagnostic(`reloaded config from ${configPath}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      logDiagnostic(`config reload failed, keeping last good: ${msg}`);
+    }
+  });
+} catch (e) {
+  logDiagnostic(`fs.watch unavailable for config: ${e instanceof Error ? e.message : String(e)}`);
+}
+
 // One entry point (09-03): scope tmux passthrough before Electron starts, then
 // arrange the restore. Fails closed if tmux cannot be scoped.
 try {
@@ -174,6 +230,8 @@ try {
 }
 
 const args = [electronPath, join(root, 'dist/index.js'), '--high-dpi-support=1'];
+// Pass resolved config JSON path to Electron
+process.env[RESOLVED_CONFIG_ENV] = configJsonPath;
 
 // Kitty respects the virtual scale size, while other terminals respect the physical scale size, which confuses things
 const forcedDisplayScale = getDisplayScale();

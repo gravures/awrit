@@ -63,11 +63,43 @@ awrit --help
 
 ## Configuration
 
-`awrit` can be configured through `config.js` in the project root. Changes to it will update the config in any running `awrit`.
+`awrit` is configured with a single `config.toml`, looked up in this order:
 
-Currently it only supports custom keybindings and changing the homepage that displays when no URL is provided.
+1. `--config <path>`
+2. `./config.toml` in the current directory
+3. `$XDG_CONFIG_HOME/awrit/config.toml` (usually `~/.config/awrit/config.toml`)
 
-For more details on keybinding syntax and available actions, see the comments in `config.js`.
+If none exists, awrit writes the default file to `~/.config/awrit/config.toml` the first
+time it starts, so there is nothing to set up. Edits are picked up while awrit runs; a
+broken edit keeps the last good config and the reason goes to the log
+(`$XDG_STATE_HOME/awrit/awrit.log`, usually `~/.local/state/awrit/awrit.log`).
+
+The file is plain data — no JavaScript is ever executed from it:
+
+```toml
+# Page shown when no URL is given.
+homepage = "https://github.com/chase/awrit"
+
+# Pane pixels divided by this is the bitmap Electron renders; 2 = quarter of the
+# pixels (larger text, softer edges), 1 = 1:1 with the pane.
+rasterScale = 2
+
+# GPU shared-texture paint path for the fallback renderer (Ghostty outside tmux).
+sharedTexture = true
+
+[keybindings]
+"<C-r>" = "refresh"
+"<Cmd-f>" = "find" # Cmd on macOS, Ctrl elsewhere
+```
+
+Available actions: `back`, `forward`, `refresh`, `find`, `select-all`, `zoom-in`,
+`zoom-out`, `zoom-reset`, `copy`, `paste`, `diagnostic-copy`, `quit`.
+
+Key sequence syntax: `<C-x>` ctrl, `<A-x>` alt, `<S-x>` shift, `<M-x>` meta,
+`<Cmd-x>` Command on macOS and Ctrl elsewhere, `<Super-x>` the super/Windows key —
+so one file expresses the same intent on both platforms. Multi-key sequences like
+`<C-w>l` work as well. The shipped defaults live in `config.toml` and are generated
+from `src/config.ts`, which also documents every option.
 
 ## Contributing
 

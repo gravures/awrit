@@ -3,7 +3,17 @@ import type { WindowView } from './windows';
 
 const isMac = process.platform === 'darwin';
 
-export type KeyBindingAction = (event: { isMac: boolean; view?: WindowView }) => void;
+export type KeyBindingEvent = {
+  isMac: boolean;
+  view?: WindowView;
+  /** Optional arguments for actions that take parameters (reserved for growth). */
+  args?: Record<string, unknown>;
+};
+
+export type KeyBindingAction = (event: KeyBindingEvent) => void;
+
+/** name → action: the built-in vocabulary a config file names. */
+export type ActionRegistry = Record<string, KeyBindingAction>;
 
 type KeyBinding = {
   keys: string[];
@@ -50,7 +60,9 @@ function parseKeyBinding(binding: string): string[] {
         const mods = special.split('-');
         let lastPart = mods[mods.length - 1].toLowerCase();
 
-        // Normalize special key names to match the native addon (src/native.ts)
+        // Normalize special key names to what the native addon emits
+        // (awrit-native-rs/src/input.rs translate_key_code). Every name not
+        // listed here is already emitted verbatim by the native side.
         switch (lastPart) {
           case 'cr':
           case 'enter':
@@ -62,18 +74,6 @@ function parseKeyBinding(binding: string): string[] {
           case 'bs':
             lastPart = 'backspace';
             break;
-          case 'up':
-          case 'down':
-          case 'left':
-          case 'right':
-          case 'home':
-          case 'end':
-          case 'pageup':
-          case 'pagedown':
-          case 'tab':
-          case 'delete':
-          case 'insert':
-          case 'space':
           case 'plus':
             lastPart = '+';
             break;
@@ -96,9 +96,19 @@ function parseKeyBinding(binding: string): string[] {
             case 'm':
               modifiers.push('meta');
               break;
+            case 'cmd':
+            case 'command':
+              // The platform's primary combo: Command on macOS, Ctrl elsewhere,
+              // so one binding in one file expresses the same intent on both.
+              modifiers.push(isMac ? 'super' : 'ctrl');
+              break;
+            case 'super':
+            case 'win':
+              modifiers.push('super');
+              break;
           }
         }
-        current = mods[mods.length - 1];
+        current = lastPart;
 
         if (modifiers.length > 0) {
           parts.push([...modifiers.sort(), current].join('+'));
@@ -126,9 +136,17 @@ function parseKeyBinding(binding: string): string[] {
 }
 
 /**
- * Load keybindings from a config object
+ * Load keybindings from a config object.
+ *
+ * Each value is either an action function (legacy/JS config) or the *name* of
+ * a built-in action, resolved through `registry`. Names that do not resolve are
+ * skipped and returned in `unknown` so the caller can report them — a bad name
+ * must not be dropped silently.
  */
-export function loadKeyBindings(config: { keybindings: Record<string, KeyBindingAction> }) {
+export function loadKeyBindings(
+  config: { keybindings: Record<string, string | KeyBindingAction> },
+  registry?: ActionRegistry,
+): { unknown: string[] } {
   // Clear existing bindings
   bindings.clear();
   currentSequence = [];
@@ -138,8 +156,17 @@ export function loadKeyBindings(config: { keybindings: Record<string, KeyBinding
   }
   pendingAction = null;
 
+  const unknown: string[] = [];
+
   // Add new bindings
-  for (const [binding, action] of Object.entries(config.keybindings)) {
+  for (const [binding, entry] of Object.entries(config.keybindings)) {
+    const action = typeof entry === 'function' ? entry : registry?.[entry];
+    if (!action) {
+      // A name that isn't in the registry — report it rather than fail silently.
+      if (typeof entry === 'string') unknown.push(entry);
+      continue;
+    }
+
     const keys = parseKeyBinding(binding);
     const firstKey = keys[0];
 
@@ -155,6 +182,8 @@ export function loadKeyBindings(config: { keybindings: Record<string, KeyBinding
       });
     }
   }
+
+  return { unknown };
 }
 
 /**

@@ -99,6 +99,14 @@ impl From<Event> for TermEvent {
         if mods.contains(KeyModifiers::META) {
           mod_vec.push("meta".to_string());
         }
+        // SUPER is Command on macOS and the super/Windows key elsewhere
+        // (crossterm only sets these bits when the terminal reports them).
+        if mods.contains(KeyModifiers::SUPER) {
+          mod_vec.push("super".to_string());
+        }
+        if mods.contains(KeyModifiers::HYPER) {
+          mod_vec.push("hyper".to_string());
+        }
         if mods.contains(KeyModifiers::CAPS_LOCK) {
           mod_vec.push("capsLock".to_string());
         }

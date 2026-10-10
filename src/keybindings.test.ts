@@ -319,3 +319,53 @@ describe('Keybindings System', () => {
     expect(triggered).toBe('save');
   });
 });
+
+describe('key normalization and cross-platform modifiers', () => {
+  beforeEach(() => {
+    loadKeyBindings({ keybindings: {} });
+  });
+
+  function press(code: string, modifiers: string[] = []): boolean {
+    return handleEvent({
+      eventType: 'key',
+      keyEvent: {
+        code,
+        modifiers: modifiers as never,
+        down: true,
+        isCharEvent: false,
+      },
+    } as TermEvent);
+  }
+
+  test('<A-minus> matches what the native addon emits: alt+-', () => {
+    loadKeyBindings({ keybindings: { '<A-minus>': () => {} } });
+    expect(press('-', ['alt'])).toBe(true);
+    // the un-normalized spelling must not match anything
+    expect(press('minus', ['alt'])).toBe(false);
+  });
+
+  test('named keys keep the names the native addon emits', () => {
+    loadKeyBindings({
+      keybindings: { '<Enter>': () => {}, '<Esc>': () => {}, '<Tab>': () => {} },
+    });
+    expect(press('return')).toBe(true);
+    expect(press('escape')).toBe(true);
+    expect(press('tab')).toBe(true);
+    // regression: these used to be mangled to '+' by the normalizer
+    expect(press('+')).toBe(false);
+  });
+
+  test('<Cmd-key> is the platform primary combo (Cmd on macOS, Ctrl elsewhere)', () => {
+    loadKeyBindings({ keybindings: { '<Cmd-r>': () => {} } });
+    const primary = process.platform === 'darwin' ? ['super'] : ['ctrl'];
+    expect(press('r', primary)).toBe(true);
+    const other = process.platform === 'darwin' ? ['ctrl'] : ['super'];
+    expect(press('r', other)).toBe(false);
+  });
+
+  test('<Super-key> is the literal super/Windows key', () => {
+    loadKeyBindings({ keybindings: { '<Super-1>': () => {} } });
+    expect(press('1', ['super'])).toBe(true);
+    expect(press('1', ['ctrl'])).toBe(false);
+  });
+});

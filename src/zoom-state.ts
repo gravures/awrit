@@ -30,7 +30,7 @@ export async function loadZoomState(): Promise<void> {
 /**
  * Returns the cached zoom factor for an origin, or 1.0 as default.
  * Falls back to reading the JSON file directly so the cache doesn't need
- * to be populated at startup — config.js writes directly to the file.
+ * to be populated at startup — actions.ts writes directly to the file.
  */
 export function getZoomFactor(origin: string): number {
   const cached = zoomMap.get(origin);
