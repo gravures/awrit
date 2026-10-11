@@ -22,6 +22,7 @@ cargo-binstall = "latest"
 pre-commit = "latest"
 cocogitto = "latest"
 "aqua:ouch-org/ouch" = "latest"
+node = "22.12.0"
 
 [hooks]
 postinstall = { task = "postinstall" }
@@ -314,6 +315,8 @@ run = [
   "rm -rf dist",
   "mkdir -p dist/electron/app",
   "bun build src/index.ts src/preload.js --outdir dist/electron/app --root src --target node --format cjs --sourcemap=inline --external electron --external '*.node' --external '*/awrit-native-rs'",
+  "mkdir -p dist/electron/app/electron-chrome-extensions/dist",
+  "cp node_modules/electron-chrome-extensions/dist/chrome-extension-api.preload.js dist/electron/app/electron-chrome-extensions/dist/",
   "printf '%s' {{ env.release_version }} >dist/electron/app/version",
   # No TTY at pack time: ship an empty theme placeholder
   "touch dist/electron/app/kitty.css",
@@ -377,7 +380,7 @@ run = '''
   scratch="$(mktemp -d)"
   trap 'rm -rf "$scratch"' EXIT
   ouch decompress -q -y "{{ config_root }}/{{ env.release_tarball }}" -d "$scratch"
-  {% for f in ["awrit", "electron/app/index.js", "electron/app/preload.js", "electron/app/kitty.css", "electron/app/version", "electron/awrit-native-rs/index.js", "LICENSE", "README.md", "CHANGELOG.md", "electron/path.txt"] %}
+  {% for f in ["awrit", "electron/app/index.js", "electron/app/preload.js", "electron/app/kitty.css", "electron/app/version", "electron/app/electron-chrome-extensions/dist/chrome-extension-api.preload.js", "electron/awrit-native-rs/index.js", "LICENSE", "README.md", "CHANGELOG.md", "electron/path.txt"] %}
   test -e "$scratch/{{ f }}" || { echo "release: missing {{ f }}" >&2; exit 1; }
   {% endfor %}
   test -n "$(ls -A "$scratch/electron/app/toolbar")" || { echo "release: electron/app/toolbar is empty" >&2; exit 1; }

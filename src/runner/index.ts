@@ -121,6 +121,22 @@ if (!isRelease) {
     }
   }
 
+  // The extension preload is resolved at runtime from the app directory (see
+  // src/extensions.ts). __dirname is inlined to the build machine, so ship the
+  // file beside the app; bundle_electron mirrors this for the release tarball.
+  const extensionPreloadSrc = join(
+    root,
+    'node_modules/electron-chrome-extensions/dist/chrome-extension-api.preload.js',
+  );
+  if (fs.existsSync(extensionPreloadSrc)) {
+    const extensionPreloadDir = join(appDir, 'electron-chrome-extensions/dist');
+    fs.mkdirSync(extensionPreloadDir, { recursive: true });
+    fs.copyFileSync(
+      extensionPreloadSrc,
+      join(extensionPreloadDir, 'chrome-extension-api.preload.js'),
+    );
+  }
+
   const version = require(join(root, 'package.json')).version;
   const distVersion = Bun.file(join(appDir, 'version'));
 

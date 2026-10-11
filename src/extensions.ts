@@ -1,4 +1,5 @@
 import { installExtension } from 'electron-chrome-web-store';
+import { app } from 'electron';
 import { sessionPromise } from './session';
 import { ElectronChromeExtensions } from 'electron-chrome-extensions';
 import path from 'node:path';
@@ -12,7 +13,11 @@ export const extensionsPromise = sessionPromise.then((session) => {
   return new ElectronChromeExtensions({
     session,
     license: 'GPL-3.0',
-    modulePath: path.join(__dirname, '../node_modules/electron-chrome-extensions'),
+    // __dirname is inlined at build time to the build machine's source tree
+    // (Bun --root src), so it cannot locate the package at runtime. The
+    // preload is shipped beside the app (bundle_electron, and the dev runner)
+    // and located through the runtime app directory instead.
+    modulePath: path.join(app.getAppPath(), 'electron-chrome-extensions'),
   });
 });
 

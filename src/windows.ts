@@ -1,4 +1,5 @@
 import {
+  app,
   BrowserWindow,
   type BrowserWindowConstructorOptions,
   type WebContents,
@@ -197,7 +198,11 @@ export async function createWindowWithToolbar(
       // nothing, then a jump"). ODR must never background-throttle.
       backgroundThrottling: false,
 
-      preload: path.resolve(__dirname, 'preload.js'),
+      // __dirname is inlined at build time to the build machine's source tree
+      // (Bun --root src), so it is useless at runtime. app.getAppPath() is the
+      // directory Electron was launched from (dist/electron/app in dev,
+      // electron/app in the release tarball), which is where these files sit.
+      preload: path.join(app.getAppPath(), 'preload.js'),
     },
   });
 
@@ -397,7 +402,7 @@ export async function createWindowWithToolbar(
       activate: false,
     });
   } else {
-    toolbar.webContents.loadFile(path.resolve(__dirname, 'toolbar/index.html'));
+    toolbar.webContents.loadFile(path.join(app.getAppPath(), 'toolbar/index.html'));
   }
   // The toolbar's UI is sized in absolute px for a ~40px bar (h-6 inputs,
   // text-sm, border-b-2). Its window is one raster cell tall, so at rasterScale 2
