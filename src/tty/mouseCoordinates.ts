@@ -44,8 +44,12 @@ export function normalizeTmuxMouseCoordinates(
   if (!Number.isFinite(cellToPxX) || cellToPxX <= 0) cellToPxX = 1;
   if (!Number.isFinite(cellToPxY) || cellToPxY <= 0) cellToPxY = 1;
 
+  // tmux only tells us which cell was clicked, not where inside it. Map to the
+  // cell *center*: the top-left corner collapses the whole toolbar row to y=0
+  // (the toolbar is one cell tall), which lands in the bar's empty padding and
+  // makes its vertically-centred input/buttons unclickable.
   return {
-    x: Math.floor(rawX * cellToPxX),
-    y: Math.floor(rawY * cellToPxY),
+    x: Math.floor((rawX + 0.5) * cellToPxX),
+    y: Math.floor((rawY + 0.5) * cellToPxY),
   };
 }

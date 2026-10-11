@@ -74,10 +74,16 @@ describe('inputHandler tmux mouse normalization', () => {
     expect(getForcedTmuxMouseCoordinateMode(undefined)).toBeNull();
   });
 
-  test('normalizes cell coordinates into pixels in cell mode', () => {
+  test('normalizes cell coordinates to the cell center in cell mode', () => {
     const termSize = { cols: 100, rows: 40, width: 1000, height: 800 };
     const point = normalizeTmuxMouseCoordinates(10, 5, termSize, 'cell');
-    expect(point).toEqual({ x: 100, y: 100 });
+    expect(point).toEqual({ x: 105, y: 110 });
+  });
+
+  test('maps the first row to the middle of the first cell, not y=0', () => {
+    const termSize = { cols: 100, rows: 40, width: 1000, height: 800 };
+    const point = normalizeTmuxMouseCoordinates(0, 0, termSize, 'cell');
+    expect(point).toEqual({ x: 5, y: 10 });
   });
 
   test('passes coordinates through in pixel mode', () => {
