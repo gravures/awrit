@@ -5,6 +5,13 @@ electron_dist = "{{ [vars.electron_dir, 'dist' ] | join_path }}"
 electron_cache = "{{ [xdg_cache_home, 'electron'] | join_path }}"
 electron_plist = "{{ [vars.electron_dist, 'Electron.app', 'Contents', 'Info.plist' ] | join_path }}"
 awrit_native_dir = "{{ [config_root, 'awrit-native-rs',] | join_path }}"
+dist_dir = "{{ [config_root, 'dist'] | join_path }}"
+release_platform = """{% set targets = {
+  'x86_64-unknown-linux-gnu': 'linux-x64',
+  'aarch64-unknown-linux-gnu': 'linux-arm64',
+  'x86_64-apple-darwin': 'macos-x64',
+  'aarch64-apple-darwin': 'macos-arm64',
+} %}{{ targets | get(key=env.BUILD_TARGET | default(value=''), default=os() ~ '-' ~ arch()) }}"""
 
 [env]
 
@@ -14,6 +21,7 @@ rust = "stable"
 cargo-binstall = "latest"
 pre-commit = "latest"
 cocogitto = "latest"
+"aqua:ouch-org/ouch" = "latest"
 
 [hooks]
 postinstall = { task = "postinstall" }
@@ -59,7 +67,6 @@ run = '''
 
 [tasks."setup:unzip-electron"]
 hide = true
-tools."aqua:ouch-org/ouch" = "latest"
 usage = '''
 arg "<file>"
 '''
@@ -100,7 +107,9 @@ confirm = "this action is irreversible, continue?"
 run = [
   # root
   "rm -rf ./node_modules 2>/dev/null || :",
+  # dist is the single shippable tree; the release tarball + checksum land at the project root
   "rm -rf ./dist 2>/dev/null || :",
+  "rm -f ./awrit-*.tar.gz ./awrit-*.tar.gz.sha 2>/dev/null || :",
   "rm -rf ./.bun 2>/dev/null || :",
   # awrit-native-rs
   "rm -rf ./awrit-native-rs/node_modules 2>/dev/null || :",
@@ -169,11 +178,6 @@ run = '''
 alias = "typecheck"
 description = "verify typescript types"
 run = "tsc --noEmit --skipLibCheck"
-
-[tasks."dev:start"]
-alias = "start"
-description = "start [todo]"
-run = "electron dist/index.cjs"
 
 [tasks."dev:audit"]
 alias = "audit"
@@ -272,3 +276,113 @@ usage = '''
 arg "[args]" var=#true help="any arguments to provide to awrit"
 '''
 run = "bun run {{ config_root }}/src/runner {{ usage.args | join(sep=' ') }}"
+
+##########################################################
+# Release
+#
+# dist/ is the single shippable tree: the dev flow (mise run awrit) and the
+# release pipeline write into the same layout, and pack_release compresses it
+# as-is. The tarball + checksum land at the project root. Subtasks are named
+# after what they ship:
+#   bundle_electron -> dist/electron/app  (JS bundle + toolbar + version + theme)
+#   bundle_awrit    -> dist/awrit         (compiled runner)
+#   ship_meta       -> dist/LICENSE, README.md, CHANGELOG.md
+#   stage_runtime   -> dist/electron/{awrit-native-rs,path.txt,dist}
+#   macos_patch     -> dock-hide the bundled Electron (macOS only)
+#   pack_release    -> dist/ -> <root>/awrit-<ver>-<platform>.tar.gz + .sha
+#   verify_bundle   -> unpack to scratch, assert the layout, run the binary once
+[tasks."release"]
+description = "build a self-contained release tarball and checksum for this platform"
+env.release_version = "{{ exec(command='mise run version:get') | trim | trim_start(pat='v') }}"
+env.release_name = "awrit-{{ env.release_version }}-{{ vars.release_platform }}"
+env.release_tarball = "{{ env.release_name ~ '.tar.gz' }}"
+env.release_checksum = "{{ env.release_name ~ '.tar.gz.sha' }}"
+run = [
+  { task = "bundle_electron" },
+  { task = "bundle_awrit" },
+  { task = "ship_meta" },
+  { task = "stage_runtime" },
+  { task = "macos_patch" },
+  { task = "pack_release" },
+  { task = "verify_bundle" },
+]
+
+[tasks.bundle_electron]
+description = "Electron main bundle + version marker + theme placeholder into dist/electron/app, then the toolbar"
+hide = true
+run = [
+  "rm -rf dist",
+  "mkdir -p dist/electron/app",
+  "bun build src/index.ts src/preload.js --outdir dist/electron/app --root src --target node --format cjs --sourcemap=inline --external electron --external '*.node' --external '*/awrit-native-rs'",
+  "printf '%s' {{ env.release_version }} >dist/electron/app/version",
+  # No TTY at pack time: ship an empty theme placeholder
+  "touch dist/electron/app/kitty.css",
+  "( cd src/runner && bun ../../node_modules/vite/bin/vite.js build )",
+]
+
+[tasks.bundle_awrit]
+description = "compile the runner into dist/awrit"
+hide = true
+run = '''
+bun build --compile src/runner/index.ts --outfile dist/awrit \
+  --external electron --external '*.node' --external '*/devServer'
+'''
+
+[tasks.ship_meta]
+description = "ship LICENSE, README and CHANGELOG into dist/"
+hide = true
+run = '''
+mkdir -p dist
+cp LICENSE README.md CHANGELOG.md dist/
+'''
+
+[tasks.stage_runtime]
+description = "stage the native addon + electron runtime next to the app in dist/electron/"
+hide = true
+run = '''
+mkdir -p dist/electron/awrit-native-rs
+cp {{ vars.awrit_native_dir }}/index.js {{ vars.awrit_native_dir }}/index.d.ts dist/electron/awrit-native-rs/
+cp {{ vars.awrit_native_dir }}/*.node dist/electron/awrit-native-rs/
+cp node_modules/electron/path.txt dist/electron/path.txt
+cp -R node_modules/electron/dist dist/electron/dist
+'''
+
+[tasks.macos_patch]
+description = "macOS: hide the bundled Electron from the Dock before packing"
+hide = true
+run = '''
+{% if os() == "macos" %}
+  sed -i '' 's/<\/dict>/    <key>LSUIElement<\/key>\n    <true\/>\n<\/dict>/' "dist/electron/dist/Electron.app/Contents/Info.plist" || true
+{% endif %}
+'''
+
+[tasks.pack_release]
+description = "pack dist/ into <root>/awrit-<ver>-<platform>.tar.gz and write the .sha checksum"
+hide = true
+dir = "{{ vars.dist_dir }}"
+run = '''
+ouch compress -q -y awrit electron LICENSE README.md CHANGELOG.md "{{ config_root }}/{{ env.release_tarball }}"
+cd "{{ config_root }}"
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum "{{ env.release_tarball }}" >"{{ env.release_checksum }}"
+else
+  shasum -a 256 "{{ env.release_tarball }}" >"{{ env.release_checksum }}"
+fi
+'''
+
+[tasks.verify_bundle]
+description = "unpack the tarball to a scratch dir, assert the layout and run the binary once"
+hide = true
+run = '''
+  scratch="$(mktemp -d)"
+  trap 'rm -rf "$scratch"' EXIT
+  ouch decompress -q -y "{{ config_root }}/{{ env.release_tarball }}" -d "$scratch"
+  {% for f in ["awrit", "electron/app/index.js", "electron/app/preload.js", "electron/app/kitty.css", "electron/app/version", "electron/awrit-native-rs/index.js", "LICENSE", "README.md", "CHANGELOG.md", "electron/path.txt"] %}
+  test -e "$scratch/{{ f }}" || { echo "release: missing {{ f }}" >&2; exit 1; }
+  {% endfor %}
+  test -n "$(ls -A "$scratch/electron/app/toolbar")" || { echo "release: electron/app/toolbar is empty" >&2; exit 1; }
+  test -f "{{ config_root }}/{{ env.release_checksum }}" || { echo "release: missing {{ env.release_checksum }}" >&2; exit 1; }
+  "$scratch/awrit" --help >/dev/null
+  test "$("$scratch/awrit" --version)" = "{{ env.release_version }}" || { echo "release: version mismatch" >&2; exit 1; }
+  echo "release: ok -> {{ config_root }}/{{ env.release_tarball }}"
+  '''

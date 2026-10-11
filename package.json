@@ -15,14 +15,13 @@
   "engines": {
     "node": ">=22.11.0"
   },
-  "workspaces": ["src/runner"],
+  "workspaces": [ "src/runner" ],
   "scripts": {
     "test": "bun test",
     "format": "biome format --write .",
     "lint": "biome lint ./src",
     "lint-fix": "biome lint --write ./src",
     "lint-fix-unsafe": "biome lint --write --unsafe ./src",
-    "start": "echo 'Run awrit with `mise run awrit` (dev) or the installed `awrit` binary' && exit 1",
     "input-test": "bun run ./src/tty/inputTest.ts",
     "gfx-test": "bun run ./src/tty/graphicsTest.ts",
     "bump-crossterm": "git subtree pull --prefix=awrit-native-rs/crates/crossterm --squash https://github.com/crossterm-rs/crossterm master",
@@ -42,7 +41,7 @@
     "@types/sinonjs__fake-timers": "^8.1.5",
     "typescript": "^5.9.2"
   },
-  "trustedDependencies": ["@biomejs/biome", "@tailwindcss/oxide", "core-js", "electron", "esbuild"],
+  "trustedDependencies": [ "@biomejs/biome", "@tailwindcss/oxide", "core-js", "electron", "esbuild" ],
   "patchedDependencies": {
     "lru-cache@5.1.1": "patches/lru-cache@5.1.1.patch"
   }

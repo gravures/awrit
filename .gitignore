@@ -1,6 +1,8 @@
 node_modules
 dist
 out
+awrit-*.tar.gz
+awrit-*.tar.gz.sha
 .DS_Store
 *.log*
 .bun

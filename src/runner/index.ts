@@ -30,6 +30,13 @@ function resolveElectronPath(): string {
   return require('electron') as unknown as string;
 }
 
+// The Electron app entry differs by layout: the release tarball nests it under
+// electron/app/ (beside the runtime), while the dev tree builds it into the
+// same shape at dist/electron/app/ so dist/ stays a single shippable tree.
+function resolveAppEntry(): string {
+  return isRelease ? join(root, 'electron/app/index.js') : join(root, 'dist/electron/app/index.js');
+}
+
 // There is no shell wrapper to rename us anymore (09-03): the process names
 // itself so ps/comm show `awrit` rather than the bun binary.
 process.title = 'awrit';
@@ -66,7 +73,7 @@ if (options.help) {
 
 if (options.version) {
   const version = isRelease
-    ? (await Bun.file(join(root, 'dist/version')).text()).trim()
+    ? (await Bun.file(join(root, 'electron/app/version')).text()).trim()
     : (await $`git rev-parse --short HEAD`.quiet()).text().trim();
   if (stdout.isTTY) {
     stdout.write(`${BOLD_GREEN}awrit${RESET} ${version}\n`);
@@ -76,14 +83,30 @@ if (options.version) {
   process.exit(0);
 }
 
-// Release tarballs ship a pre-built dist/ (Task 1); only the dev tree builds it.
+// dist/ is the single shippable tree: the dev flow (mise run awrit) and the
+// release pipeline share the layout, so this branch writes the app into
+// dist/electron/app/ and leaves the runtime/metadata/runner to the release
+// pipeline. The native addon must sit beside app/ for the externalized
+// `../awrit-native-rs` require; dev points it at the source tree (bundle_electron
+// wipes dist/ first, so the symlink never leaks into a release tarball).
 if (!isRelease) {
-  await $`mkdir -p ${root}/dist`.nothrow().quiet();
+  const appDir = join(root, 'dist/electron/app');
+  await $`mkdir -p ${appDir}`.nothrow().quiet();
+
+  const addonLink = join(root, 'dist/electron/awrit-native-rs');
+  if (!fs.existsSync(addonLink)) {
+    // existsSync follows the link: a dangling link reports false but still
+    // occupies the name, and symlinkSync would then throw EEXIST.
+    if (fs.lstatSync(addonLink, { throwIfNoEntry: false })?.isSymbolicLink()) {
+      fs.unlinkSync(addonLink);
+    }
+    fs.symlinkSync(join(root, 'awrit-native-rs'), addonLink, 'dir');
+  }
 
   {
     const { success } = await Bun.build({
       entrypoints: [join(root, 'src/index.ts'), join(root, 'src/preload.js')],
-      outdir: join(root, 'dist'),
+      outdir: appDir,
       root: join(root, 'src'),
       target: 'node',
       format: 'cjs',
@@ -99,7 +122,7 @@ if (!isRelease) {
   }
 
   const version = require(join(root, 'package.json')).version;
-  const distVersion = Bun.file(join(root, 'dist/version'));
+  const distVersion = Bun.file(join(appDir, 'version'));
 
   if (!(await distVersion.exists()) || (await distVersion.text()) !== version || options.rebuild) {
     logDiagnostic('building toolbar');
@@ -117,7 +140,7 @@ if (!isRelease) {
             warned = true;
           }
         } else {
-          await Bun.write(join(root, 'dist/kitty.css'), colorsToTailwind(colors));
+          await Bun.write(join(appDir, 'kitty.css'), colorsToTailwind(colors));
           didQueryColors = true;
         }
       } catch {
@@ -131,7 +154,7 @@ if (!isRelease) {
     // TODO: figure out why this isn't reliable for some users
     if (!didQueryColors) {
       // empty placeholder required for building in case of failure
-      await Bun.write(join(root, 'dist/kitty.css'), '');
+      await Bun.write(join(appDir, 'kitty.css'), '');
     }
 
     try {
@@ -229,7 +252,7 @@ try {
   fatal((e as Error).message);
 }
 
-const args = [electronPath, join(root, 'dist/index.js'), '--high-dpi-support=1'];
+const args = [electronPath, resolveAppEntry(), '--high-dpi-support=1'];
 // Pass resolved config JSON path to Electron
 process.env[RESOLVED_CONFIG_ENV] = configJsonPath;
 

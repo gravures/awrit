@@ -12,7 +12,7 @@ export default {
     port: TOOLBAR_PORT,
   },
   build: {
-    outDir: '../../dist/toolbar',
+    outDir: '../../dist/electron/app/toolbar',
     emptyOutDir: true,
     sourcemap: true,
     // Prevent `.node` being renamed to `[hash].node` in require('...')
