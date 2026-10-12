@@ -307,7 +307,7 @@ function handleInputEvent(evt: TermEvent) {
 
       // Terminal coords are pane px; webContents wants raster px, which is
       // pane px divided by the display scale *and* the raster scale. Fold both
-      // into one factor so the row-0 bar test below compares like with like.
+      // into one factor so the bottom-row bar test below compares like with like.
       const toRaster = view.layoutContainer.devicePixelRatio * getRasterScale();
       const rawX = x ?? 0;
       const rawY = y ?? 0;
@@ -315,10 +315,10 @@ function handleInputEvent(evt: TermEvent) {
       const normalizedX = normalized.x / toRaster;
       const normalizedY = normalized.y / toRaster;
 
-      // Row 0 is the bar; everything below is the page. `contentNode` starts one
-      // cell down, so this is `row === 0` (07-03).
-      const { contentNode } = view;
-      const isInBar = normalizedY < contentNode.deviceLayout.y;
+      // Bottom row is the bar; everything above is the page. `barNode` is the
+      // last row, so this is `y >= barNode.y` (bottom bar).
+      const { contentNode, barNode } = view;
+      const isInBar = normalizedY >= barNode.deviceLayout.y;
 
       // Position relative to the page (the bar has no scrollable content).
       const adjustedX = Math.floor(normalizedX);

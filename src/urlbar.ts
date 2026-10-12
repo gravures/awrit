@@ -82,7 +82,7 @@ function barText({ mode, buffer, findCount }: BarState): string {
 }
 
 /**
- * Row-0 write: one CUP + SGR + exactly `cols` cells + reset, plus a positioned,
+ * Bottom-row write: one CUP + SGR + exactly `cols` cells + reset, plus a positioned,
  * shown cursor in the editing modes. Pure, so it can be asserted byte-for-byte.
  *
  * In normal mode a lock glyph prefixes the URL and is always kept visible (the
@@ -93,8 +93,9 @@ function barText({ mode, buffer, findCount }: BarState): string {
  * cell (no wcwidth) and on overflow the tail is shown so the cursor stays visible.
  * Upgrade if wide/emoji input matters.
  */
-export function renderBar(state: BarState): string {
+export function renderBar(state: BarState, rows: number): string {
   const cols = Math.max(1, Math.floor(state.cols));
+  const targetRow = Math.max(1, Math.floor(rows));
   const isNormal = state.mode === 'normal';
   const prefix = isNormal ? LOCK_PREFIX[state.lock] : '';
   const prefixWidth = isNormal ? LOCK_PREFIX_WIDTH[state.lock] : 0;
@@ -103,25 +104,28 @@ export function renderBar(state: BarState): string {
   const dropped = Math.max(0, full.length - avail);
   const tail = dropped > 0 ? full.slice(dropped) : full;
   const line = prefix + tail + ' '.repeat(Math.max(0, avail - tail.length));
-  const out = cup(1, 1) + BAR_THEMES[state.theme] + line + SGR_RESET;
+  const out = cup(targetRow, 1) + BAR_THEMES[state.theme] + line + SGR_RESET;
   if (!isBarEditing(state.mode)) return out + CURSOR_OFF;
   const cell = Math.max(0, Math.min(cols - 1, BAR_PROMPT_WIDTH + state.cursor - dropped));
-  return out + cup(1, cell + 1) + CURSOR_ON;
+  return out + cup(targetRow, cell + 1) + CURSOR_ON;
 }
 
-/** Render the current bar state into pane row 0 — plain CSI, never an image. */
+/** Render the current bar state into the bottom pane row — plain CSI, never an image. */
 export function redrawBar(view?: WindowView): void {
   const url = view?.content.webContents.getURL() || features.bar.url;
   features.bar.url = url;
   // No readable pane size (piped stdout, tests) — nothing to pad to.
   let cols = 0;
+  let rows = 0;
   try {
-    cols = getWindowSize().cols;
+    const size = getWindowSize();
+    cols = size.cols;
+    rows = size.rows;
   } catch {
     return;
   }
-  if (!cols) return;
-  process.stdout.write(renderBar({ ...features.bar, url, cols }));
+  if (!cols || !rows) return;
+  process.stdout.write(renderBar({ ...features.bar, url, cols }, rows));
 }
 
 /** Enter URL editing (the `focus-url` action and a click in row 0). */

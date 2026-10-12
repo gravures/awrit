@@ -157,8 +157,8 @@ export async function createWindow(
   const hasAnimation = features.current?.loadFrame && features.current.compositeFrame;
   const useTmuxRenderer = isTmuxSession();
 
-  // Calculate layout
-  calculateLayout(layoutContainer, [barNode, contentNode]);
+  // Calculate layout: content first (top), bar last (bottom)
+  calculateLayout(layoutContainer, [contentNode, barNode]);
 
   const transparentWindowSettings = {
     transparent: true,
@@ -404,7 +404,7 @@ function updateViewSizes(view: WindowView, { width, height, rows }: Size) {
 
   // The cell the bar snaps to changed with the pane; recompute before layout.
   barNode.height = px(barHeight(rows, height, raster));
-  calculateLayout(view.layoutContainer, [barNode, contentNode]);
+  calculateLayout(view.layoutContainer, [contentNode, barNode]);
 
   content.setContentSize(contentNode.computedLayout.width, contentNode.computedLayout.height);
 }
