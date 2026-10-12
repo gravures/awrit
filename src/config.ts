@@ -29,6 +29,7 @@ export interface RawConfig {
   rasterScale?: number;
   sharedTexture?: boolean;
   searchEngine?: string;
+  barTheme?: string;
   keybindings?: RawKeybindings;
 }
 
@@ -38,6 +39,7 @@ export interface AwritConfig {
   rasterScale: number;
   sharedTexture: boolean;
   searchEngine: string;
+  barTheme: string;
   keybindings: Record<string, string>;
 }
 
@@ -102,6 +104,14 @@ export const CONFIG_OPTIONS: ConfigOption[] = [
     type: 'string',
     default: 'https://duckduckgo.com/?q=',
     doc: 'Search engine URL template. Use {q} for the query (URL-encoded).',
+  },
+  {
+    key: 'barTheme',
+    type: 'string',
+    default: 'reverse',
+    doc:
+      'Row-0 bar colour preset: reverse, none, dark, light, accent. An unknown value falls ' +
+      'back to reverse (the default look).',
   },
   {
     key: 'keybindings',

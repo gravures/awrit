@@ -43,7 +43,7 @@ import { features } from './features';
 import { updateCursor } from './tty/cursor';
 import { debounce } from './debounce';
 import { isTmuxSession } from './tty/tmux';
-import { redrawBar } from './urlbar';
+import { lockForUrl, redrawBar } from './urlbar';
 
 export type Actions = {
   back: () => void;
@@ -360,15 +360,22 @@ export async function createWindow(
   // Terminals can't display faster than ~60fps anyway; caps apply here.
   updateFrameRates();
 
-  // Keep the bar's URL in sync while it is showing (not editing/finding).
+  // Keep the bar's URL and lock indicator in sync while it is showing (not editing/finding).
   const syncBarUrl = (url: string) => {
     if (!url) return;
     features.bar.url = url;
+    features.bar.lock = lockForUrl(url);
     if (features.bar.mode === 'normal') redrawBar(view);
   };
   content.webContents.on('did-navigate', (_event, url) => syncBarUrl(url));
   content.webContents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
     if (isMainFrame) syncBarUrl(url);
+  });
+
+  // Live find match position for the bar's [i/n] counter.
+  content.webContents.on('found-in-page', (_event, result) => {
+    features.bar.findCount = { index: result.activeMatchOrdinal, total: result.matches };
+    redrawBar(view);
   });
 
   process.on(

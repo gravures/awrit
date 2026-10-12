@@ -342,21 +342,25 @@ describe('inputHandler bar: editing keys', () => {
     features.bar.mode = 'find-editing';
     features.bar.buffer = 'needle';
     features.bar.cursor = 6;
+    features.bar.findCount = { index: 3, total: 9 };
 
     handleInput(key('return', { isCharEvent: true }) as any);
 
     expect(view.content.webContents.findInPage).toHaveBeenCalledWith('needle', { forward: true });
     expect(features.bar.mode).toBe('find');
+    expect(features.bar.findCount).toEqual({ index: 0, total: 0 }); // cleared until found-in-page
   });
 
-  test('Esc while finding clears the selection', async () => {
+  test('Esc while finding clears the selection and the counter', async () => {
     const { view, features, handleInput } = await setup();
     features.bar.mode = 'find';
     features.bar.buffer = 'needle';
+    features.bar.findCount = { index: 2, total: 5 };
 
     handleInput(key('escape') as any);
 
     expect(view.content.webContents.stopFindInPage).toHaveBeenCalledWith('clearSelection');
     expect(features.bar.mode).toBe('normal');
+    expect(features.bar.findCount).toEqual({ index: 0, total: 0 });
   });
 });

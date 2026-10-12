@@ -33,6 +33,7 @@ describe('config schema', () => {
     expect(config.homepage).toBe('https://example.com');
     expect(config.rasterScale).toBe(2);
     expect(config.sharedTexture).toBe(true);
+    expect(config.barTheme).toBe('reverse');
     expect(config.keybindings).toEqual(DEFAULT_KEYBINDINGS);
   });
 
@@ -84,6 +85,10 @@ describe('config schema', () => {
     const parsed = Bun.TOML.parse(generateToml());
     const bindings = parsed.keybindings as Record<string, string>;
     expect(bindings['<C-o>']).toBe('focus-url');
+  });
+
+  test('the generated file records the barTheme default', () => {
+    expect(Bun.TOML.parse(generateToml()).barTheme).toBe('reverse');
   });
 
   test('defaults build from the declaration, not a second copy', () => {

@@ -9,7 +9,7 @@ import {
 import * as out from './tty/output';
 import { handleInput } from './inputHandler';
 import { createWindow } from './windows';
-import { redrawBar } from './urlbar';
+import { isBarTheme, redrawBar } from './urlbar';
 import { console_ } from './console';
 import { options } from './args';
 import { features } from './features';
@@ -49,6 +49,13 @@ function loadConfig(config: AwritConfig) {
   setRasterScale(config.rasterScale);
   setSharedTexture(config.sharedTexture);
   features.searchEngine = config.searchEngine;
+  if (isBarTheme(config.barTheme)) {
+    features.bar.theme = config.barTheme;
+  } else {
+    features.bar.theme = 'reverse';
+    console_.error(`Unknown barTheme: "${config.barTheme}" (using "reverse")`);
+  }
+  redrawBar(); // repaint the bar immediately on a live config reload
   const { unknown } = loadKeyBindings({ keybindings: config.keybindings }, actions);
   for (const name of unknown) {
     console_.error(`Unknown keybinding action: "${name}"`);

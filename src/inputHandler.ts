@@ -151,6 +151,7 @@ function cancelBar(view: WindowView) {
   bar.mode = 'normal';
   bar.buffer = '';
   bar.cursor = 0;
+  bar.findCount = { index: 0, total: 0 };
   redrawBar(view);
 }
 
@@ -167,8 +168,11 @@ function commitBar(view: WindowView) {
     bar.mode = 'normal';
     bar.buffer = '';
     bar.cursor = 0;
+    bar.findCount = { index: 0, total: 0 };
     redrawBar(view);
   } else if (bar.mode === 'find-editing') {
+    // New query: clear the stale counter until found-in-page reports the first result.
+    bar.findCount = { index: 0, total: 0 };
     view.content.webContents.findInPage(bar.buffer, { forward: true });
     bar.mode = 'find';
     redrawBar(view);
