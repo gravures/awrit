@@ -78,11 +78,11 @@ The file is plain data — no JavaScript is ever executed from it:
 
 ```toml
 # Page shown when no URL is given.
-homepage = "https://github.com/chase/awrit"
+homepage = "https://duckduckgo.com"
 
-# Pane pixels divided by this is the bitmap Electron renders; 2 = quarter of the
-# pixels (larger text, softer edges), 1 = 1:1 with the pane.
-rasterScale = 2
+# Pane pixels divided by this is the bitmap Electron renders; 1 = 1:1 with the
+# pane. 2 = quarter of the pixels (larger text, softer edges).
+rasterScale = 1
 
 # GPU shared-texture paint path for the fallback renderer (Ghostty outside tmux).
 sharedTexture = true

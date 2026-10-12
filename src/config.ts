@@ -79,17 +79,19 @@ export const CONFIG_OPTIONS: ConfigOption[] = [
   {
     key: 'homepage',
     type: 'string',
-    default: 'https://github.com/chase/awrit',
-    doc: 'Page shown when no URL is given.',
+    default: 'auto',
+    doc:
+      'Page shown when no URL is given. "auto" (default) uses the searchEngine base URL; ' +
+      'any other value is used as-is.',
   },
   {
     key: 'rasterScale',
     type: 'number',
-    default: 2,
+    default: 1,
     doc:
       'Pane pixels divided by this is the bitmap Electron renders; the terminal stretches it ' +
-      'back over the same cells. 2 = a quarter of the pixels, upscaled 2x (larger text, softer ' +
-      'edges). 1 = 1:1 with the pane. Any positive number works.',
+      'back over the same cells. 1 = 1:1 with the pane. 2 = a quarter of the pixels, upscaled 2x ' +
+      '(larger text, softer edges). Any positive number works.',
   },
   {
     key: 'sharedTexture',
@@ -121,11 +123,24 @@ export const CONFIG_OPTIONS: ConfigOption[] = [
   },
 ];
 
+function baseUrlFromSearchEngine(se: string): string {
+  try {
+    const u = new URL(se);
+    return u.origin;
+  } catch {
+    return 'https://duckduckgo.com';
+  }
+}
+
 /** The default config, built from CONFIG_OPTIONS — the source of the generated file. */
 export function defaultConfig(): RawConfig {
   const out: Record<string, unknown> = {};
   for (const opt of CONFIG_OPTIONS) {
     out[opt.key] = opt.type === 'table' ? { ...(opt.default as object) } : opt.default;
+  }
+  // Derive homepage from searchEngine when "auto" (the default).
+  if (out.homepage === 'auto') {
+    out.homepage = baseUrlFromSearchEngine(out.searchEngine as string);
   }
   return out as RawConfig;
 }
@@ -280,6 +295,11 @@ export function normalizeConfig(raw: RawConfig): NormalizedConfig {
 
   for (const key of Object.keys(raw)) {
     if (!CONFIG_OPTIONS.some((o) => o.key === key)) unknownKeys.push(key);
+  }
+
+  // Derive homepage from searchEngine when "auto" (the default).
+  if (out.homepage === 'auto') {
+    out.homepage = baseUrlFromSearchEngine(out.searchEngine as string);
   }
 
   // `out` has an entry for every declared option — that is the AwritConfig

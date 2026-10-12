@@ -144,7 +144,7 @@ export function updateFrameRates() {
  */
 export async function createWindow(
   size: { width: number; height: number; rows?: number },
-  initialUrl = 'https://github.com/chase/awrit',
+  initialUrl = 'https://duckduckgo.com',
 ): Promise<WindowView> {
   const raster = getRasterScale();
   const layoutContainer = layoutForPane(size);

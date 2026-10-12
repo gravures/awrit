@@ -39,7 +39,7 @@ import {
   type AwritConfig,
 } from './config';
 
-let homepage = 'https://github.com/chase/awrit';
+let homepage = 'https://duckduckgo.com';
 
 // The runner resolves, parses and normalizes the TOML config and writes it as
 // JSON (09-04 option-a); this side only reads that JSON, applies it and

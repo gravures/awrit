@@ -32,7 +32,7 @@ describe('config schema', () => {
     // keys the user set are theirs, the rest come from CONFIG_OPTIONS.
     const { config } = normalizeConfig({ homepage: 'https://example.com' });
     expect(config.homepage).toBe('https://example.com');
-    expect(config.rasterScale).toBe(2);
+    expect(config.rasterScale).toBe(1);
     expect(config.sharedTexture).toBe(true);
     expect(config.barTheme).toBe('reverse');
     expect(config.keybindings).toEqual(DEFAULT_KEYBINDINGS);
