@@ -109,6 +109,27 @@ function maybeNormalizeTmuxMouseCoordinates(rawX: number, rawY: number) {
   return normalizeTmuxMouseCoordinates(rawX, rawY, termSize, mouseCoordinateMode);
 }
 
+/**
+ * Sanitizes bracketed-paste text by stripping markers and escape sequences.
+ * Pure function: no I/O, no view access.
+ */
+export function sanitizePaste(text: string): string {
+  // Strip bracketed-paste markers: ESC[200~ and ESC[201~
+  const ESC = '\u001b';
+  let out = text.replace(new RegExp(`${ESC}\\[200~`, 'g'), '').replace(new RegExp(`${ESC}\\[201~`, 'g'), '');
+
+  // Strip other CSI sequences: ESC[ ... final_byte
+  out = out.replace(new RegExp(`${ESC}\\[[\\x30-\\x3f]*[\\x20-\\x2f]*[\\x40-\\x7e]`, 'g'), '');
+
+  // Strip OSC/DCS/APC/PM: ESC]...ST, ESCP...ST, ESC_...ST, ESC^...ST
+  out = out.replace(new RegExp(`${ESC}[\\x5d\\x50\\x5f\\x5e].*?(\\x07|${ESC}\\\\)`, 'g'), '');
+
+  // Strip bare ESC and C1 CSI (0x9b)
+  out = out.replace(new RegExp(ESC, 'g'), '').replace(/\u009b/g, '');
+
+  return out;
+}
+
 export function handleInput(evt: TermEvent) {
   perfCount(evt.eventType === 'mouse' ? `in.${evt.mouseEvent.kind}` : `in.${evt.eventType}`);
   const t0 = perfTime();
@@ -260,9 +281,13 @@ function handleInputEvent(evt: TermEvent) {
       cachedTermSize = undefined;
       invalidatePaneSizeCache();
       break;
-    case 'paste':
-      // paste: bracketed-paste handling lands in plan 05-02
+    case 'paste': {
+      const text = sanitizePaste(evt.paste ?? '');
+      if (text.length > 0) {
+        view.focusedContent.insertText(text);
+      }
       break;
+    }
     case 'escape':
       // no TS consumer yet — crossterm capability queries resolve in Rust
       break;

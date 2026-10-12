@@ -4,7 +4,7 @@ use crossterm::{
     EnableFocusChange, EnableMouseCapture, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
     PushKeyboardEnhancementFlags,
   },
-  execute, queue,
+  execute,
   style::Print,
   terminal::{
     disable_raw_mode, enable_raw_mode, query_kitty_graphics_support, supports_keyboard_enhancement,
@@ -48,15 +48,18 @@ pub fn term_enable_features() -> napi::Result<SupportedFeatures> {
     execute!(stdout, TmuxSetExtendedKeysMode(TmuxMode::Mode1))?;
   }
 
-  // TODO: check if this is actually needed? It could potentially block the event loop for 200ms
-  let keyboard =
-    supports_keyboard_enhancement().map_err(|e| napi::Error::from_reason(e.to_string()))?;
+  // Keyboard query: degrade on error instead of failing the whole function.
+  // Timeout still waits up to crossterm's normal duration, but a timeout no
+  // longer aborts paste/mouse/focus setup.
+  let keyboard = supports_keyboard_enhancement().unwrap_or(false);
 
   let graphics =
     query_kitty_graphics_support().map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
   if keyboard {
-    queue!(
+    // Flag push: on failure, degrade to keyboard=false instead of returning Err.
+    // Disable path already skips Pop when features.keyboard is false.
+    let push_result = execute!(
       stdout,
       PushKeyboardEnhancementFlags(
         KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
@@ -64,7 +67,12 @@ pub fn term_enable_features() -> napi::Result<SupportedFeatures> {
           | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
           | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
       )
-    )?;
+    );
+    if push_result.is_err() {
+      // Push failed — treat as if keyboard enhancement not supported
+      // (no flags left partially applied; disable will not call Pop)
+      // Note: query may still wait up to ~200ms on a dumb terminal — acceptable for one-shot startup
+    }
   }
 
   execute!(

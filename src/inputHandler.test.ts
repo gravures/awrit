@@ -11,7 +11,7 @@ mock.module('./windows', () => ({
   setTerminalIsFocused: () => {},
   updateFrameRates: () => {},
 }));
-const { buildWheelEvent, shouldSendMouseMove } = await import('./inputHandler');
+const { buildWheelEvent, shouldSendMouseMove, sanitizePaste } = await import('./inputHandler');
 
 describe('buildWheelEvent', () => {
   test('scrollUp/scrollDown produce Y-only wheel deltas', () => {
@@ -136,5 +136,37 @@ describe('shouldSendMouseMove', () => {
     expect(
       shouldSendMouseMove({ ...base, modifiers: ['shift'] }, { ...base, modifiers: [] }),
     ).toBe(true);
+  });
+});
+
+describe('sanitizePaste', () => {
+  test('removes bracketed-paste markers', () => {
+    expect(sanitizePaste('\x1b[200~hello\x1b[201~')).toBe('hello');
+  });
+
+  test('removes embedded CSI sequences, keeps surrounding text', () => {
+    expect(sanitizePaste('before\x1b[31mred\x1b[0mafter')).toBe('beforeredafter');
+  });
+
+  test('empty input and marker-only returns empty string', () => {
+    expect(sanitizePaste('')).toBe('');
+    expect(sanitizePaste('\x1b[200~\x1b[201~')).toBe('');
+  });
+
+  test('preserves multiline text', () => {
+    expect(sanitizePaste('line1\nline2\nline3')).toBe('line1\nline2\nline3');
+  });
+
+  test('strips OSC sequences', () => {
+    expect(sanitizePaste('\x1b]0;title\x07text')).toBe('text');
+  });
+
+  test('strips bare ESC and C1 CSI', () => {
+    expect(sanitizePaste('\x1bescape')).toBe('escape');
+    expect(sanitizePaste('\x9bCSI')).toBe('CSI');
+  });
+
+  test('preserves Unicode, tabs, newlines', () => {
+    expect(sanitizePaste('hello\tworld\n🎉')).toBe('hello\tworld\n🎉');
   });
 });
