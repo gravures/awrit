@@ -58,7 +58,7 @@ describe('raster scale', () => {
 describe('cell span', () => {
   test('a halved bitmap still claims the full pane', () => {
     at(2);
-    // Content is the pane minus a whole-cell toolbar, so it is 103x26 cells:
+    // Content is the pane minus a whole-cell bar row, so it is 103x26 cells:
     // 978px of bitmap over 103 cols, 546px over 26 rows.
     expect(cellSpan({ width: 978, height: 546 }, PANE)).toEqual({ cols: 103, rows: 26 });
   });

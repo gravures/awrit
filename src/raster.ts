@@ -57,8 +57,8 @@ export function rasterCellToPx(size: TermSize) {
  * — the same trick tmux gets from `a=p,c,r` without `w=/h=`.
  *
  * The image's aspect has to track the cell rect or the terminal letterboxes
- * (black bars). Snapping the toolbar to a whole cell is what keeps the two in
- * step: a whole-cell toolbar leaves the content a whole number of cells, so the
+ * (black bars). Snapping the bar to a whole cell is what keeps the two in
+ * step: a whole-cell bar leaves the content a whole number of cells, so the
  * span lands within a pixel of the bitmap's own aspect.
  */
 export function cellSpan(

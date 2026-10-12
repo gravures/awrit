@@ -285,7 +285,7 @@ run = "bun run {{ config_root }}/src/runner {{ usage.args | join(sep=' ') }}"
 # release pipeline write into the same layout, and pack_release compresses it
 # as-is. The tarball + checksum land at the project root. Subtasks are named
 # after what they ship:
-#   bundle_electron -> dist/electron/app  (JS bundle + toolbar + version + theme)
+#   bundle_electron -> dist/electron/app  (JS bundle + version + theme)
 #   bundle_awrit    -> dist/awrit         (compiled runner)
 #   ship_meta       -> dist/LICENSE, README.md, CHANGELOG.md
 #   stage_runtime   -> dist/electron/{awrit-native-rs,path.txt,dist}
@@ -309,18 +309,17 @@ run = [
 ]
 
 [tasks.bundle_electron]
-description = "Electron main bundle + version marker + theme placeholder into dist/electron/app, then the toolbar"
+description = "Electron main bundle + version marker + theme placeholder into dist/electron/app"
 hide = true
 run = [
   "rm -rf dist",
   "mkdir -p dist/electron/app",
-  "bun build src/index.ts src/preload.js --outdir dist/electron/app --root src --target node --format cjs --sourcemap=inline --external electron --external '*.node' --external '*/awrit-native-rs'",
+  "bun build src/index.ts --outdir dist/electron/app --root src --target node --format cjs --sourcemap=inline --external electron --external '*.node' --external '*/awrit-native-rs'",
   "mkdir -p dist/electron/app/electron-chrome-extensions/dist",
   "cp node_modules/electron-chrome-extensions/dist/chrome-extension-api.preload.js dist/electron/app/electron-chrome-extensions/dist/",
   "printf '%s' {{ env.release_version }} >dist/electron/app/version",
   # No TTY at pack time: ship an empty theme placeholder
   "touch dist/electron/app/kitty.css",
-  "( cd src/runner && bun ../../node_modules/vite/bin/vite.js build )",
 ]
 
 [tasks.bundle_awrit]
@@ -328,7 +327,7 @@ description = "compile the runner into dist/awrit"
 hide = true
 run = '''
 bun build --compile src/runner/index.ts --outfile dist/awrit \
-  --external electron --external '*.node' --external '*/devServer'
+  --external electron --external '*.node'
 '''
 
 [tasks.ship_meta]
@@ -380,10 +379,9 @@ run = '''
   scratch="$(mktemp -d)"
   trap 'rm -rf "$scratch"' EXIT
   ouch decompress -q -y "{{ config_root }}/{{ env.release_tarball }}" -d "$scratch"
-  {% for f in ["awrit", "electron/app/index.js", "electron/app/preload.js", "electron/app/kitty.css", "electron/app/version", "electron/app/electron-chrome-extensions/dist/chrome-extension-api.preload.js", "electron/awrit-native-rs/index.js", "LICENSE", "README.md", "CHANGELOG.md", "electron/path.txt"] %}
+  {% for f in ["awrit", "electron/app/index.js", "electron/app/kitty.css", "electron/app/version", "electron/app/electron-chrome-extensions/dist/chrome-extension-api.preload.js", "electron/awrit-native-rs/index.js", "LICENSE", "README.md", "CHANGELOG.md", "electron/path.txt"] %}
   test -e "$scratch/{{ f }}" || { echo "release: missing {{ f }}" >&2; exit 1; }
   {% endfor %}
-  test -n "$(ls -A "$scratch/electron/app/toolbar")" || { echo "release: electron/app/toolbar is empty" >&2; exit 1; }
   test -f "{{ config_root }}/{{ env.release_checksum }}" || { echo "release: missing {{ env.release_checksum }}" >&2; exit 1; }
   "$scratch/awrit" --help >/dev/null
   test "$("$scratch/awrit" --version)" = "{{ env.release_version }}" || { echo "release: version mismatch" >&2; exit 1; }

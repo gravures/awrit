@@ -20,6 +20,7 @@ import {
 import { getPaneSize, isTmuxSession } from './tty/tmux';
 import { FrameCoalescer } from './tty/frameCoalescer';
 import { TmuxRenderer } from './tty/tmuxRenderer';
+import { redrawBar } from './urlbar';
 
 /** Shared-texture paint path gate (06-06). Default on; config.toml can disable. */
 let sharedTextureEnabled = true;
@@ -201,6 +202,8 @@ export function registerPaintedContent(
         .loadFrame(frameNumber, result.buffer, imageSize)
         .composite(layoutNode.deviceLayout);
       perfEnd('paint.encode→submit', tSubmit);
+      // The full-pane animation container can cover row 0; rewrite the bar.
+      redrawBar();
       perfCount('paint.completed');
     } catch (error) {
       // A paint failure must not become an unhandled rejection: it would kill
@@ -537,6 +540,7 @@ export function registerPaintedContentTmux(
         slotId,
       );
       perfEnd('submit.raster→submit', tSubmit);
+      redrawBar();
       perfCount('submit.completed');
     } catch (error) {
       console_.error('tmux renderer paint failed; retained frame queued for retry', error);
@@ -698,6 +702,7 @@ export function registerPaintedContentFallback(
         lastDone = perfTime();
         perfCount('paint.tex');
         perfCount('paint.completed');
+        redrawBar();
       } finally {
         // The pin is consumed by write_texture, but if the blit threw before
         // reaching it, drop the mapping here — a leaked dmabuf mapping pins
@@ -763,6 +768,7 @@ export function registerPaintedContentFallback(
       if (perfEnabled) perfValue('shmfd', countShmFds());
       if (perfEnabled) perfValue('fr', contents.getFrameRate());
       perfCount('paint.completed');
+      redrawBar();
       lastDone = perfTime();
     } catch (error) {
       // Same containment as the animation handler: never let a paint error

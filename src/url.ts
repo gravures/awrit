@@ -1,5 +1,5 @@
 /**
- * URL validation and helpers for the toolbar.
+ * URL validation and helpers for the row-0 URL bar.
  * Pure functions with no I/O.
  */
 

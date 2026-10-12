@@ -30,8 +30,6 @@
     "awrit-native-rs",
     "src/runner",
     "src/runner/**/*",
-    "src/toolbar",
-    "src/toolbar/**/*",
     "src/**/*.test.ts",
     "src/tty/inputTest.ts",
     "src/tty/graphicsTest.ts"

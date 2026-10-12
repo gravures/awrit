@@ -2,8 +2,8 @@ import { exec } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { features } from './features';
 import type { ActionRegistry, KeyBindingEvent } from './keybindings';
+import { startFindEditing, startUrlEditing } from './urlbar';
 
 /**
  * Electron is required lazily. This module is imported by unit tests, where the
@@ -139,25 +139,16 @@ function refresh({ view }: KeyBindingEvent) {
 }
 
 function find({ view }: KeyBindingEvent) {
-  if (!view) return;
-  view.toolbar.webContents.send('toolbar:toggle-find');
-  view.content.blurWebView();
-  view.toolbar.focusOnWebView();
-  view.focusedContent = view.toolbar.webContents;
+  startFindEditing(view);
 }
 
-/** Focus the URL bar. Sets `toolbarFocused` so Esc in `inputHandler` returns to the page. */
+/** Focus the URL bar: the row-0 edit line takes the keys until Enter/Esc. */
 function focusUrl({ view }: KeyBindingEvent) {
-  if (!view) return;
-  view.content.blurWebView();
-  view.toolbar.focusOnWebView();
-  view.focusedContent = view.toolbar.webContents;
-  view.toolbar.webContents.send('toolbar:focus-url');
-  features.toolbarFocused = true;
+  startUrlEditing(view);
 }
 
 function selectAll({ view }: KeyBindingEvent) {
-  view?.focusedContent.selectAll();
+  view?.content.webContents.selectAll();
 }
 
 // ---------------------------------------------------------------------------
@@ -242,7 +233,7 @@ function zoomReset({ view }: KeyBindingEvent) {
 
 function copy({ view }: KeyBindingEvent) {
   if (!view) return;
-  const target = view.focusedContent;
+  const target = view.content.webContents;
 
   // Use JavaScript extraction for more predictable behavior in offscreen mode
   const copyScript = `(() => {
@@ -274,7 +265,7 @@ function copy({ view }: KeyBindingEvent) {
 
 function paste({ view }: KeyBindingEvent) {
   if (!view) return;
-  const target = view.focusedContent;
+  const target = view.content.webContents;
 
   readFromSystemClipboard()
     .then((text) => {

@@ -8,8 +8,10 @@ import {
 } from './tty/mouseCoordinates';
 import { invalidatePaneSizeCache, isTmuxSession } from './tty/tmux';
 import { getRasterScale } from './raster';
-import { focusedView, setTerminalIsFocused, updateFrameRates } from './windows';
+import { focusedView, setTerminalIsFocused, updateFrameRates, type WindowView } from './windows';
 import { features } from './features';
+import { isBarEditing, redrawBar, startUrlEditing } from './urlbar';
+import { isProbablyURL, normalizeURL } from './url';
 
 const WHEEL_DELTA = 100;
 
@@ -131,6 +133,84 @@ export function sanitizePaste(text: string): string {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Terminal-native bar editing (07-03)
+// ---------------------------------------------------------------------------
+
+function insertIntoBar(text: string) {
+  const bar = features.bar;
+  bar.buffer = bar.buffer.slice(0, bar.cursor) + text + bar.buffer.slice(bar.cursor);
+  bar.cursor += text.length;
+}
+
+function cancelBar(view: WindowView) {
+  const bar = features.bar;
+  if (bar.mode === 'find' || bar.mode === 'find-editing') {
+    view.content.webContents.stopFindInPage('clearSelection');
+  }
+  bar.mode = 'normal';
+  bar.buffer = '';
+  bar.cursor = 0;
+  redrawBar(view);
+}
+
+function commitBar(view: WindowView) {
+  const bar = features.bar;
+  if (bar.mode === 'normal-editing') {
+    const query = bar.buffer.trim();
+    if (query) {
+      const target = isProbablyURL(query)
+        ? normalizeURL(query)
+        : features.searchEngine + encodeURIComponent(query);
+      view.content.webContents.loadURL(target);
+    }
+    bar.mode = 'normal';
+    bar.buffer = '';
+    bar.cursor = 0;
+    redrawBar(view);
+  } else if (bar.mode === 'find-editing') {
+    view.content.webContents.findInPage(bar.buffer, { forward: true });
+    bar.mode = 'find';
+    redrawBar(view);
+  }
+}
+
+/** Handle a key while the bar is editing; always consumes it so the page never sees it. */
+function handleBarKey(evt: TermEvent, view: WindowView) {
+  if (evt.eventType !== 'key') return;
+  const { code, down, isCharEvent } = evt.keyEvent as KeyEvent;
+  if (!down) return; // ignore key-up while editing
+  const bar = features.bar;
+  switch (code) {
+    case 'escape':
+      cancelBar(view);
+      return;
+    case 'return':
+      commitBar(view);
+      return;
+    case 'backspace':
+      if (bar.cursor > 0) {
+        bar.buffer = bar.buffer.slice(0, bar.cursor - 1) + bar.buffer.slice(bar.cursor);
+        bar.cursor -= 1;
+      }
+      redrawBar(view);
+      return;
+    case 'left':
+      if (bar.cursor > 0) bar.cursor -= 1;
+      redrawBar(view);
+      return;
+    case 'right':
+      if (bar.cursor < bar.buffer.length) bar.cursor += 1;
+      redrawBar(view);
+      return;
+    default:
+      if (isCharEvent) {
+        insertIntoBar(code === 'space' ? ' ' : code);
+        redrawBar(view);
+      }
+  }
+}
+
 export function handleInput(evt: TermEvent) {
   perfCount(evt.eventType === 'mouse' ? `in.${evt.mouseEvent.kind}` : `in.${evt.eventType}`);
   const t0 = perfTime();
@@ -163,23 +243,31 @@ function handleInputEvent(evt: TermEvent) {
         return;
       }
 
+      // While the bar is editing, keys edit the buffer and never reach the page.
+      if (isBarEditing(features.bar.mode)) {
+        handleBarKey(evt, view);
+        return;
+      }
+
       const { code: keyCode, modifiers, down, isCharEvent } = evt.keyEvent as KeyEvent;
 
-      // Escape returns focus from the toolbar to the page. Only while the URL bar
-      // holds focus, so Esc otherwise reaches the page. (`<C-o>` focuses it via
-      // the `focus-url` action in `config.toml`.)
-      if (keyCode === 'escape' && down && features.toolbarFocused) {
-        if (view) {
-          view.content.focusOnWebView();
-          view.toolbar.blurWebView();
-          view.focusedContent = view.content.webContents;
-          features.toolbarFocused = false;
-          view.toolbar.webContents.send('toolbar:blur-url');
+      // An active find keeps stepping on Enter/Up/Down and clears on Esc;
+      // every other key still reaches the page.
+      if (features.bar.mode === 'find' && down) {
+        if (keyCode === 'escape') {
+          cancelBar(view);
+          return;
+        }
+        if (keyCode === 'return' || keyCode === 'up' || keyCode === 'down') {
+          view.content.webContents.findInPage(features.bar.buffer, {
+            forward: keyCode !== 'up',
+            findNext: true,
+          });
           return;
         }
       }
 
-      const webContents = view.focusedContent;
+      const webContents = view.content.webContents;
 
       if (isCharEvent && down) {
         webContents.sendInputEvent({
@@ -215,7 +303,7 @@ function handleInputEvent(evt: TermEvent) {
 
       // Terminal coords are pane px; webContents wants raster px, which is
       // pane px divided by the display scale *and* the raster scale. Fold both
-      // into one factor so the toolbar test below compares like with like.
+      // into one factor so the row-0 bar test below compares like with like.
       const toRaster = view.layoutContainer.devicePixelRatio * getRasterScale();
       const rawX = x ?? 0;
       const rawY = y ?? 0;
@@ -223,17 +311,23 @@ function handleInputEvent(evt: TermEvent) {
       const normalizedX = normalized.x / toRaster;
       const normalizedY = normalized.y / toRaster;
 
-      // Determine which region we're in based on layout
-      const { toolbarNode, contentNode } = view;
-      const isInToolbar = normalizedY < contentNode.deviceLayout.y;
+      // Row 0 is the bar; everything below is the page. `contentNode` starts one
+      // cell down, so this is `row === 0` (07-03).
+      const { contentNode } = view;
+      const isInBar = normalizedY < contentNode.deviceLayout.y;
 
-      // Calculate position relative to the target component
+      // Position relative to the page (the bar has no scrollable content).
       const adjustedX = Math.floor(normalizedX);
-      const adjustedY = Math.floor(
-        normalizedY - (isInToolbar ? 0 : toolbarNode.deviceLayout.height),
-      );
+      const adjustedY = Math.floor(normalizedY - contentNode.deviceLayout.y);
 
-      const focusedContent = isInToolbar ? view.toolbar.webContents : view.content.webContents;
+      // Bar clicks focus the edit line; bar mouse moves/ups are swallowed so no
+      // bogus coordinates reach the page. Scroll still goes to the page.
+      if (isInBar && isSimpleMouseEvent(kind)) {
+        if (kind === 'mouseDown' && button === 'left') {
+          startUrlEditing(view);
+        }
+        break;
+      }
 
       if (
         kind === 'scrollUp' ||
@@ -259,7 +353,7 @@ function handleInputEvent(evt: TermEvent) {
 
       if (kind === 'mouseMove') {
         const next: MouseMoveSnapshot = {
-          view: focusedContent,
+          view: contentNode,
           x: adjustedX,
           y: adjustedY,
           modifiers: modifiers ?? [],
@@ -268,7 +362,7 @@ function handleInputEvent(evt: TermEvent) {
         lastMouseMove = next;
       }
 
-      focusedContent.sendInputEvent({
+      view.content.webContents.sendInputEvent({
         type: kind,
         x: adjustedX,
         y: adjustedY,
@@ -276,19 +370,6 @@ function handleInputEvent(evt: TermEvent) {
         modifiers,
         clickCount: kind === 'mouseDown' ? 1 : 0,
       });
-
-      if (kind === 'mouseDown' && button === 'left') {
-        if (focusedContent !== view.focusedContent) {
-          if (focusedContent === view.content.webContents) {
-            view.toolbar.blurWebView();
-            view.content.focusOnWebView();
-          } else {
-            view.content.blurWebView();
-            view.toolbar.focusOnWebView();
-          }
-          view.focusedContent = focusedContent;
-        }
-      }
       break;
     }
 
@@ -300,7 +381,12 @@ function handleInputEvent(evt: TermEvent) {
     case 'paste': {
       const text = sanitizePaste(evt.paste ?? '');
       if (text.length > 0) {
-        view.focusedContent.insertText(text);
+        if (isBarEditing(features.bar.mode)) {
+          insertIntoBar(text);
+          redrawBar(view);
+        } else {
+          view.content.webContents.insertText(text);
+        }
       }
       break;
     }

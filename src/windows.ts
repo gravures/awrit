@@ -1,12 +1,9 @@
 import {
-  app,
   BrowserWindow,
   type BrowserWindowConstructorOptions,
   type WebContents,
-  ipcMain,
   screen,
 } from 'electron';
-import path from 'node:path';
 import {
   registerPaintedContent,
   registerPaintedContentFallback,
@@ -18,9 +15,8 @@ import { paintInitialFrame } from './tty/kittyGraphics';
 import {
   getWindowSize as rawGetWindowSize,
   ShmGraphicBuffer,
-  type WindowSize,
 } from './native';
-import { loadZoomState, getZoomFactor, setZoomFactor, saveZoomState } from './zoom-state';
+import { getZoomFactor } from './zoom-state';
 
 export function getWindowSize() {
   try {
@@ -32,7 +28,6 @@ export function getWindowSize() {
 }
 import { options } from './args';
 import { console_ } from './console';
-import { TOOLBAR_PORT } from './runner/ports';
 import {
   layout,
   row,
@@ -48,6 +43,7 @@ import { features } from './features';
 import { updateCursor } from './tty/cursor';
 import { debounce } from './debounce';
 import { isTmuxSession } from './tty/tmux';
+import { redrawBar } from './urlbar';
 
 export type Actions = {
   back: () => void;
@@ -56,11 +52,9 @@ export type Actions = {
 };
 
 export type WindowView = {
-  toolbar: BrowserWindow;
   content: BrowserWindow;
-  focusedContent: WebContents;
   layoutContainer: LayoutContainer;
-  toolbarNode: LayoutNode;
+  barNode: LayoutNode;
   contentNode: LayoutNode;
 } & Actions;
 
@@ -74,18 +68,18 @@ export const focusedView: {
 
 export const windowViews = new WeakMap<BrowserWindow, WindowView>();
 
-const TOOLBAR_HEIGHT = 40;
+const BAR_HEIGHT = 40;
 
 /**
- * Toolbar height in DIP, snapped to one terminal cell so the terminal stretches
- * the toolbar by the same factor it stretches the content. 1.5px on a 42px
- * cell — cheap to keep aligned, and it keeps toolbar and page text the same
- * size. Falls back to the flat 40 when the pane reports no rows.
+ * Bar row height in DIP, snapped to one terminal cell so the terminal stretches
+ * the page by the same factor it stretches the bar. 1.5px on a 42px cell —
+ * cheap to keep aligned, and it keeps the one-row bar exactly one cell tall.
+ * Falls back to the flat 40 when the pane reports no rows.
  */
-function toolbarHeight(rows: number | undefined, paneHeight: number, raster: number) {
-  if (!rows || rows <= 0) return TOOLBAR_HEIGHT;
+function barHeight(rows: number | undefined, paneHeight: number, raster: number) {
+  if (!rows || rows <= 0) return BAR_HEIGHT;
   const cellInRasterPx = paneHeight / rows / raster;
-  if (!Number.isFinite(cellInRasterPx) || cellInRasterPx <= 0) return TOOLBAR_HEIGHT;
+  if (!Number.isFinite(cellInRasterPx) || cellInRasterPx <= 0) return BAR_HEIGHT;
   return Math.max(1, Math.round(cellInRasterPx));
 }
 
@@ -140,31 +134,31 @@ export function updateFrameRates() {
   for (const view of managedViews) {
     const active = terminalIsFocused && view === focusedView.current;
     view.content.webContents.setFrameRate(active ? 60 : 1);
-    view.toolbar.webContents.setFrameRate(active ? 30 : 1); // Toolbar is mostly static
   }
 }
 /**
- * Creates a new window with a toolbar and main content area
+ * Creates a new window with a terminal-native one-row bar and a page area.
  * @param size Window size
- * @param initialUrl URL to load in the main content area
+ * @param initialUrl URL to load in the page
  * @returns The created window
  */
-export async function createWindowWithToolbar(
+export async function createWindow(
   size: { width: number; height: number; rows?: number },
   initialUrl = 'https://github.com/chase/awrit',
 ): Promise<WindowView> {
   const raster = getRasterScale();
   const layoutContainer = layoutForPane(size);
 
-  // Create layout nodes for toolbar and content
-  const toolbarNode = row({ height: px(toolbarHeight(size.rows, size.height, raster)), tag: 'toolbar' });
+  // The bar is not a window: this row only reserves exactly one cell at the top
+  // so `contentNode.y` stays one cell and the page spans rows 1..N-1 (07-03).
+  const barNode = row({ height: px(barHeight(size.rows, size.height, raster)), tag: 'bar' });
   const contentNode = row({ height: auto(), tag: 'content' });
 
   const hasAnimation = features.current?.loadFrame && features.current.compositeFrame;
   const useTmuxRenderer = isTmuxSession();
 
   // Calculate layout
-  calculateLayout(layoutContainer, [toolbarNode, contentNode]);
+  calculateLayout(layoutContainer, [barNode, contentNode]);
 
   const transparentWindowSettings = {
     transparent: true,
@@ -182,29 +176,6 @@ export async function createWindowWithToolbar(
     fullscreenable: false,
     resizable: false,
   };
-
-  const toolbar = new BrowserWindow({
-    ...sharedConstructorOptions,
-    ...toolbarNode.computedLayout,
-
-    webPreferences: {
-      zoomFactor: 1,
-      offscreen: true,
-      nodeIntegration: false,
-      contextIsolation: true,
-      // Windows stay show:false forever, so without this the renderer runs as
-      // a backgrounded page: idle frames throttle to ~1Hz and the first scroll
-      // after rest waits up to a second for a frame (06-06 checkpoint: "1sec
-      // nothing, then a jump"). ODR must never background-throttle.
-      backgroundThrottling: false,
-
-      // __dirname is inlined at build time to the build machine's source tree
-      // (Bun --root src), so it is useless at runtime. app.getAppPath() is the
-      // directory Electron was launched from (dist/electron/app in dev,
-      // electron/app in the release tarball), which is where these files sit.
-      preload: path.join(app.getAppPath(), 'preload.js'),
-    },
-  });
 
   const content = new BrowserWindow({
     ...sharedConstructorOptions,
@@ -226,8 +197,8 @@ export async function createWindowWithToolbar(
       offscreen: !useTmuxRenderer && !hasAnimation ? { useSharedTexture: true } : true,
       nodeIntegration: false,
       contextIsolation: true,
-      // See toolbar: show:false windows would otherwise idle-throttle frames
-      // to ~1Hz and delay the first scroll frame by up to a second.
+      // show:false windows would otherwise idle-throttle frames to ~1Hz and
+      // delay the first scroll frame by up to a second.
       backgroundThrottling: false,
       disableDialogs: true,
     },
@@ -240,7 +211,6 @@ export async function createWindowWithToolbar(
   const startSuppression = () => {
     // @ts-expect-error
     content.isSuppressingPaint = true;
-    // We do NOT suppress the toolbar anymore, so the progress bar stays visible
     // @ts-expect-error
     content.paintCount = 0;
 
@@ -322,10 +292,7 @@ export async function createWindowWithToolbar(
 
   function registerPaints(bitmapSize: Size) {
     if (useTmuxRenderer) {
-      destructors.push(
-        registerPaintedContentTmux(toolbar, toolbarNode).destroy,
-        registerPaintedContentTmux(content, contentNode).destroy,
-      );
+      destructors.push(registerPaintedContentTmux(content, contentNode).destroy);
     } else if (hasAnimation) {
       // Padded because composites are pixel rects and kitty answers EINVAL when
       // one lands outside the image; the c/r span comes from the unpadded
@@ -340,40 +307,10 @@ export async function createWindowWithToolbar(
       );
       destructors.push(
         containerFrame.free,
-        registerPaintedContent(containerFrame, toolbar, toolbarNode).destroy,
         registerPaintedContent(containerFrame, content, contentNode).destroy,
       );
-
-      // function registerPaints(size: WindowDimensions) {
-      //   lastPaintSize = size;
-      //   destructors.forEach((d) => { d(); });
-      //   destructors.length = 0;
-      //   refreshers.length = 0;
-
-      //   if (hasAnimation) {
-      //     // Content layer (z=0)
-      //     const contentBuffer = new ShmGraphicBuffer(size.width * size.height * 4);
-      //     const opaqueBlack = Buffer.alloc(size.width * size.height * 4).fill(Uint8Array.from([0, 0, 0, 255]));
-      //     contentBuffer.write(opaqueBlack, size.width);
-      //     out.placeCursor({ x: 0, y: 0 });
-      //     const contentFrame = paintInitialFrame(contentBuffer, size, { z: 0 });
-      //     const cRef = registerPaintedContent(contentFrame, content, contentNode);
-
-      //     // Toolbar layer (z=1)
-      //     const toolbarBuffer = new ShmGraphicBuffer(size.width * size.height * 4);
-      //     const transparentBlack = Buffer.alloc(size.width * size.height * 4).fill(Uint8Array.from([0, 0, 0, 0]));
-      //     toolbarBuffer.write(transparentBlack, size.width);
-      //     out.placeCursor({ x: 0, y: 0 });
-      //     const toolbarFrame = paintInitialFrame(toolbarBuffer, size, { z: 1 });
-      //     const tRef = registerPaintedContent(toolbarFrame, toolbar, toolbarNode);
-
-      //     destructors.push(contentFrame.free, toolbarFrame.free, cRef.destroy, tRef.destroy);
-      //     refreshers.push(cRef.refresh, tRef.refresh);
     } else {
-      destructors.push(
-        registerPaintedContentFallback(toolbar, toolbarNode).destroy,
-        registerPaintedContentFallback(content, contentNode).destroy,
-      );
+      destructors.push(registerPaintedContentFallback(content, contentNode).destroy);
     }
   }
 
@@ -385,32 +322,6 @@ export async function createWindowWithToolbar(
   });
   await installedExtensionsPromise;
 
-  if (options.dev) {
-    toolbar.webContents.once('did-finish-load', () => {
-      console_.error('toolbar loaded');
-    });
-    toolbar.webContents.once('did-fail-load', (_event, errorCode, errorDescription) => {
-      console_.error('toolbar failed to load', {
-        errorCode,
-        errorDescription,
-      });
-    });
-    toolbar.webContents.loadURL(`http://localhost:${TOOLBAR_PORT}`);
-    toolbar.webContents.openDevTools({
-      mode: 'detach',
-      title: 'Toolbar Dev Tools',
-      activate: false,
-    });
-  } else {
-    toolbar.webContents.loadFile(path.join(app.getAppPath(), 'toolbar/index.html'));
-  }
-  // The toolbar's UI is sized in absolute px for a ~40px bar (h-6 inputs,
-  // text-sm, border-b-2). Its window is one raster cell tall, so at rasterScale 2
-  // that content no longer fits and Chromium clips it — the terminal then
-  // stretches the clipped bitmap 2x, which is what a squashed toolbar is. Laying
-  // it out at the full cell height and letting zoom shrink it into the raster
-  // reproduces the rasterScale 1 bar exactly, softer.
-  resetForFrameQuirk(toolbar.webContents, 1 / raster);
   resetForFrameQuirk(content.webContents);
   content.webContents.loadURL(initialUrl);
 
@@ -425,15 +336,12 @@ export async function createWindowWithToolbar(
 
   content.webContents.invalidate();
 
-  toolbar.webContents.on('cursor-changed', updateCursor);
   content.webContents.on('cursor-changed', updateCursor);
 
   const view: WindowView = {
-    toolbar,
     content,
-    focusedContent: content.webContents,
     layoutContainer,
-    toolbarNode,
+    barNode,
     contentNode,
     back: () => {
       content.webContents.goBack();
@@ -452,8 +360,16 @@ export async function createWindowWithToolbar(
   // Terminals can't display faster than ~60fps anyway; caps apply here.
   updateFrameRates();
 
-  // Set up IPC for toolbar interactions
-  setupToolbarIPC(toolbar.webContents, content.webContents);
+  // Keep the bar's URL in sync while it is showing (not editing/finding).
+  const syncBarUrl = (url: string) => {
+    if (!url) return;
+    features.bar.url = url;
+    if (features.bar.mode === 'normal') redrawBar(view);
+  };
+  content.webContents.on('did-navigate', (_event, url) => syncBarUrl(url));
+  content.webContents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
+    if (isMainFrame) syncBarUrl(url);
+  });
 
   process.on(
     'SIGWINCH',
@@ -466,6 +382,8 @@ export async function createWindowWithToolbar(
       const size = getWindowSize();
       updateViewSizes(view, size);
       registerPaints(view.layoutContainer.root.deviceLayout);
+      // Re-pad the bar to the new pane width.
+      redrawBar(view);
     }),
   );
 
@@ -473,66 +391,13 @@ export async function createWindowWithToolbar(
 }
 
 function updateViewSizes(view: WindowView, { width, height, rows }: Size) {
-  const { toolbar, content, toolbarNode, contentNode } = view;
+  const { content, barNode, contentNode } = view;
   const raster = getRasterScale();
   view.layoutContainer = layoutForPane({ width, height });
 
-  // The cell the toolbar snaps to changed with the pane; recompute before layout.
-  toolbarNode.height = px(toolbarHeight(rows, height, raster));
-  calculateLayout(view.layoutContainer, [toolbarNode, contentNode]);
+  // The cell the bar snaps to changed with the pane; recompute before layout.
+  barNode.height = px(barHeight(rows, height, raster));
+  calculateLayout(view.layoutContainer, [barNode, contentNode]);
 
-  // Update window sizes based on layout
-  toolbar.setContentSize(toolbarNode.computedLayout.width, toolbarNode.computedLayout.height);
   content.setContentSize(contentNode.computedLayout.width, contentNode.computedLayout.height);
-}
-
-function setupToolbarIPC(
-  toolbarContents: Electron.WebContents,
-  contentContents: Electron.WebContents,
-) {
-  ipcMain.on('toolbar:navigate-back', () => {
-    if (contentContents.navigationHistory.canGoBack()) {
-      contentContents.navigationHistory.goBack();
-    }
-  });
-
-  ipcMain.on('toolbar:navigate-forward', () => {
-    if (contentContents.navigationHistory.canGoForward()) {
-      contentContents.navigationHistory.goForward();
-    }
-  });
-
-  ipcMain.on('toolbar:navigate-refresh', () => {
-    contentContents.reload();
-  });
-
-  ipcMain.on('toolbar:navigate-to', (_event, url: string) => {
-    contentContents.loadURL(url);
-  });
-
-  contentContents.on('did-start-loading', () => {
-    toolbarContents.send('content:loading-started');
-  });
-
-  contentContents.on('did-stop-loading', () => {
-    toolbarContents.send('content:loading-stopped');
-  });
-
-  contentContents.on('did-navigate', (_event, url) => {
-    toolbarContents.send('content:url-changed', url);
-  });
-
-  contentContents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
-    if (isMainFrame) {
-      toolbarContents.send('content:url-changed', url);
-    }
-  });
-
-  contentContents.on('did-navigate', () => {
-    const navigationState = {
-      canGoBack: contentContents.navigationHistory.canGoBack(),
-      canGoForward: contentContents.navigationHistory.canGoForward(),
-    };
-    toolbarContents.send('content:navigation-state-changed', navigationState);
-  });
 }

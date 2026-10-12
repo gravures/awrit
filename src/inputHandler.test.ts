@@ -24,8 +24,8 @@ mock.module('./windows', () => ({
 mock.module('./features', () => ({
   features: {
     current: undefined,
-    toolbarFocused: false,
     searchEngine: 'https://duckduckgo.com/?q=',
+    bar: { mode: 'normal', buffer: '', cursor: 0, url: '' },
   },
 }));
 
@@ -149,7 +149,7 @@ describe('shouldSendMouseMove', () => {
   });
 
   test('different target view is sent', () => {
-    expect(shouldSendMouseMove(base, { ...base, view: { name: 'toolbar' } })).toBe(true);
+    expect(shouldSendMouseMove(base, { ...base, view: { name: 'other' } })).toBe(true);
   });
 
   test('different modifiers are sent', () => {
@@ -192,188 +192,171 @@ describe('sanitizePaste', () => {
   });
 });
 
-describe('inputHandler keybinding: focus-url focuses toolbar', () => {
-  test('ctrl+o focuses toolbar', async () => {
+function makeView() {
+  const webContents = {
+    sendInputEvent: mock(() => {}),
+    loadURL: mock(() => {}),
+    findInPage: mock(() => {}),
+    stopFindInPage: mock(() => {}),
+    insertText: mock(() => {}),
+    selectAll: mock(() => {}),
+    getURL: mock(() => 'https://example.com'),
+  };
+  return {
+    content: { webContents },
+    layoutContainer: { devicePixelRatio: 1 },
+  };
+}
+
+const key = (code: string, over: Partial<Record<string, unknown>> = {}) => ({
+  eventType: 'key',
+  keyEvent: { code, modifiers: [], down: true, isCharEvent: false, ...over },
+});
+
+describe('inputHandler bar: focus-url enters URL editing', () => {
+  test('ctrl+o enters normal-editing with the current URL', async () => {
     const { focusedView } = await import('./windows');
     const { features } = await import('./features');
     const { handleInput } = await import('./inputHandler');
 
-    const mockToolbar = {
-      webContents: {
-        focus: mock(() => {}),
-        send: mock(() => {}),
-      },
-      focusOnWebView: mock(() => {}),
-    };
-    const mockContent = {
-      webContents: {
-        sendInputEvent: mock(() => {}),
-      },
-      focusOnWebView: mock(() => {}),
-      blurWebView: mock(() => {}),
-    };
-    const mockView = {
-      toolbar: mockToolbar,
-      content: mockContent,
-      focusedContent: mockContent.webContents,
-    };
-
-    focusedView.current = mockView;
-    features.toolbarFocused = false;
+    const view = makeView();
+    focusedView.current = view as any;
+    features.bar.mode = 'normal';
+    features.bar.buffer = '';
+    features.bar.cursor = 0;
     loadKeyBindings({ keybindings: DEFAULT_KEYBINDINGS }, actions);
 
-    // `focus-url` is bound to ctrl+o in the shipped defaults
-    const evt = {
-      eventType: 'key',
-      keyEvent: {
-        code: 'o',
-        modifiers: ['ctrl'],
-        down: true,
-        isCharEvent: false,
-      },
-    } as any;
+    handleInput(key('o', { modifiers: ['ctrl'] }) as any);
 
-    handleInput(evt);
-
-    expect(mockContent.blurWebView).toHaveBeenCalled();
-    expect(mockToolbar.focusOnWebView).toHaveBeenCalled();
-    expect(mockToolbar.webContents.send).toHaveBeenCalledWith('toolbar:focus-url');
-    expect(features.toolbarFocused).toBe(true);
-    expect(mockView.focusedContent).toBe(mockToolbar.webContents);
+    expect(features.bar.mode).toBe('normal-editing');
+    expect(features.bar.buffer).toBe('https://example.com');
+    expect(features.bar.cursor).toBe('https://example.com'.length);
+    expect(view.content.webContents.sendInputEvent).not.toHaveBeenCalled();
   });
 
-  test('bare o does not focus toolbar (it reaches the page)', async () => {
+  test('bare o reaches the page instead of starting an edit', async () => {
     const { focusedView } = await import('./windows');
     const { features } = await import('./features');
     const { handleInput } = await import('./inputHandler');
 
-    const mockToolbar = {
-      webContents: {
-        focus: mock(() => {}),
-        send: mock(() => {}),
-      },
-    };
-    const mockContent = {
-      webContents: {
-        sendInputEvent: mock(() => {}),
-      },
-      focusOnWebView: mock(() => {}),
-      blurWebView: mock(() => {}),
-    };
-    const mockView = {
-      toolbar: mockToolbar,
-      content: mockContent,
-      focusedContent: mockContent.webContents,
-    };
-
-    focusedView.current = mockView;
-    features.toolbarFocused = false;
+    const view = makeView();
+    focusedView.current = view as any;
+    features.bar.mode = 'normal';
     loadKeyBindings({ keybindings: DEFAULT_KEYBINDINGS }, actions);
 
-    const evt = {
-      eventType: 'key',
-      keyEvent: {
-        code: 'o',
-        modifiers: [],
-        down: true,
-        isCharEvent: false,
-      },
-    } as any;
+    handleInput(key('o') as any);
 
-    handleInput(evt);
-
-    expect(mockToolbar.webContents.focus).not.toHaveBeenCalled();
-    expect(features.toolbarFocused).toBe(false);
+    expect(features.bar.mode).toBe('normal');
+    expect(view.content.webContents.sendInputEvent).toHaveBeenCalled();
   });
 });
 
-describe('inputHandler keybinding: escape returns focus to page', () => {
-  test('escape key when toolbar focused returns focus to page', async () => {
+describe('inputHandler bar: editing keys', () => {
+  async function setup() {
     const { focusedView } = await import('./windows');
     const { features } = await import('./features');
     const { handleInput } = await import('./inputHandler');
+    const view = makeView();
+    focusedView.current = view as any;
+    loadKeyBindings({ keybindings: DEFAULT_KEYBINDINGS }, actions);
+    return { view, features, handleInput };
+  }
 
-    const mockToolbar = {
-      webContents: {
-        send: mock(() => {}),
-      },
-      blurWebView: mock(() => {}),
-    };
-    const mockContent = {
-      webContents: {
-        sendInputEvent: mock(() => {}),
-      },
-      focusOnWebView: mock(() => {}),
-      blurWebView: mock(() => {}),
-    };
-    const mockView = {
-      toolbar: mockToolbar,
-      content: mockContent,
-      focusedContent: mockToolbar.webContents,
-    };
+  test('typing edits the buffer locally and never reaches the page', async () => {
+    const { view, features, handleInput } = await setup();
+    features.bar.mode = 'normal-editing';
+    features.bar.buffer = '';
+    features.bar.cursor = 0;
 
-    focusedView.current = mockView;
-    features.toolbarFocused = true;
+    handleInput(key('a', { isCharEvent: true }) as any);
 
-    const evt = {
-      eventType: 'key',
-      keyEvent: {
-        code: 'escape',
-        modifiers: [],
-        down: true,
-        isCharEvent: false,
-      },
-    } as any;
-
-    handleInput(evt);
-
-    expect(mockContent.focusOnWebView).toHaveBeenCalled();
-    expect(mockToolbar.blurWebView).toHaveBeenCalled();
-    expect(features.toolbarFocused).toBe(false);
-    expect(mockToolbar.webContents.send).toHaveBeenCalledWith('toolbar:blur-url');
-    expect(mockView.focusedContent).toBe(mockContent.webContents);
+    expect(features.bar.buffer).toBe('a');
+    expect(features.bar.cursor).toBe(1);
+    expect(view.content.webContents.sendInputEvent).not.toHaveBeenCalled();
   });
 
-  test('escape key when toolbar not focused does nothing', async () => {
-    const { focusedView } = await import('./windows');
-    const { features } = await import('./features');
-    const { handleInput } = await import('./inputHandler');
+  test('space inserts a literal space', async () => {
+    const { features, handleInput } = await setup();
+    features.bar.mode = 'normal-editing';
+    features.bar.buffer = 'a';
+    features.bar.cursor = 1;
 
-    const mockToolbar = {
-      webContents: {
-        send: mock(() => {}),
-      },
-      blurWebView: mock(() => {}),
-    };
-    const mockContent = {
-      webContents: {
-        sendInputEvent: mock(() => {}),
-      },
-      focusOnWebView: mock(() => {}),
-      blurWebView: mock(() => {}),
-    };
-    const mockView = {
-      toolbar: mockToolbar,
-      content: mockContent,
-      focusedContent: mockContent.webContents,
-    };
+    handleInput(key('space', { isCharEvent: true }) as any);
 
-    focusedView.current = mockView;
-    features.toolbarFocused = false;
+    expect(features.bar.buffer).toBe('a ');
+  });
 
-    const evt = {
-      eventType: 'key',
-      keyEvent: {
-        code: 'escape',
-        modifiers: [],
-        down: true,
-        isCharEvent: false,
-      },
-    } as any;
+  test('backspace deletes before the cursor', async () => {
+    const { features, handleInput } = await setup();
+    features.bar.mode = 'normal-editing';
+    features.bar.buffer = 'abc';
+    features.bar.cursor = 2;
 
-    handleInput(evt);
+    handleInput(key('backspace') as any);
 
-    expect(mockContent.focusOnWebView).not.toHaveBeenCalled();
-    expect(mockToolbar.blurWebView).not.toHaveBeenCalled();
+    expect(features.bar.buffer).toBe('ac');
+    expect(features.bar.cursor).toBe(1);
+  });
+
+  test('Enter on a bare host navigates (normalized) and returns to normal', async () => {
+    const { view, features, handleInput } = await setup();
+    features.bar.mode = 'normal-editing';
+    features.bar.buffer = 'example.com';
+    features.bar.cursor = 'example.com'.length;
+
+    handleInput(key('return', { isCharEvent: true }) as any);
+
+    expect(view.content.webContents.loadURL).toHaveBeenCalledWith('https://example.com');
+    expect(features.bar.mode).toBe('normal');
+  });
+
+  test('Enter on a phrase searches via the configured engine', async () => {
+    const { view, features, handleInput } = await setup();
+    features.bar.mode = 'normal-editing';
+    features.bar.buffer = 'hello world';
+    features.bar.cursor = 'hello world'.length;
+
+    handleInput(key('return', { isCharEvent: true }) as any);
+
+    expect(view.content.webContents.loadURL).toHaveBeenCalledWith(
+      'https://duckduckgo.com/?q=hello%20world',
+    );
+    expect(features.bar.mode).toBe('normal');
+  });
+
+  test('Esc abandons the edit and returns to normal', async () => {
+    const { features, handleInput } = await setup();
+    features.bar.mode = 'normal-editing';
+    features.bar.buffer = 'junk';
+    features.bar.cursor = 4;
+
+    handleInput(key('escape') as any);
+
+    expect(features.bar.mode).toBe('normal');
+    expect(features.bar.buffer).toBe('');
+    expect(features.bar.cursor).toBe(0);
+  });
+
+  test('Enter in find-editing starts a forward find and switches to find', async () => {
+    const { view, features, handleInput } = await setup();
+    features.bar.mode = 'find-editing';
+    features.bar.buffer = 'needle';
+    features.bar.cursor = 6;
+
+    handleInput(key('return', { isCharEvent: true }) as any);
+
+    expect(view.content.webContents.findInPage).toHaveBeenCalledWith('needle', { forward: true });
+    expect(features.bar.mode).toBe('find');
+  });
+
+  test('Esc while finding clears the selection', async () => {
+    const { view, features, handleInput } = await setup();
+    features.bar.mode = 'find';
+    features.bar.buffer = 'needle';
+
+    handleInput(key('escape') as any);
+
+    expect(view.content.webContents.stopFindInPage).toHaveBeenCalledWith('clearSelection');
+    expect(features.bar.mode).toBe('normal');
   });
 });

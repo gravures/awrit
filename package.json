@@ -41,7 +41,7 @@
     "@types/sinonjs__fake-timers": "^8.1.5",
     "typescript": "^5.9.2"
   },
-  "trustedDependencies": [ "@biomejs/biome", "@tailwindcss/oxide", "core-js", "electron", "esbuild" ],
+  "trustedDependencies": [ "@biomejs/biome", "core-js", "electron", "esbuild" ],
   "patchedDependencies": {
     "lru-cache@5.1.1": "patches/lru-cache@5.1.1.patch"
   }

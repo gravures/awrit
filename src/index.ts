@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain } from 'electron';
+import { app, dialog } from 'electron';
 import {
   termEnableFeatures,
   listenForInput,
@@ -8,7 +8,8 @@ import {
 } from './native';
 import * as out from './tty/output';
 import { handleInput } from './inputHandler';
-import { createWindowWithToolbar, focusedView } from './windows';
+import { createWindow } from './windows';
+import { redrawBar } from './urlbar';
 import { console_ } from './console';
 import { options } from './args';
 import { features } from './features';
@@ -87,11 +88,6 @@ function reloadConfig() {
   try {
     loadConfig(cfg);
     lastGoodConfig = cfg;
-    // Send updated searchEngine to toolbar
-    const window = focusedView.current;
-    if (window?.toolbar?.webContents) {
-      window.toolbar.webContents.send('toolbar:search-engine-changed', cfg.searchEngine);
-    }
   } catch (e) {
     console_.error('Error applying config, keeping last good:', e);
     loadConfig(lastGoodConfig);
@@ -246,19 +242,7 @@ app.commandLine.appendSwitch('disable-features', 'UseBrowserCalculatedOrigin');
 app.commandLine.appendSwitch('disable-smooth-scrolling');
 
 app.whenReady().then(async () => {
-  const window = await createWindowWithToolbar(getWindowSize(), INITIAL_URL);
-
-  ipcMain.handle('findInPage', (_, text: string, opts) => {
-    window.content.webContents.findInPage(text, opts);
-  });
-
-  ipcMain.handle('stopFindInPage', () => {
-    window.content.webContents.stopFindInPage('clearSelection');
-    window.toolbar.blurWebView();
-    window.content.focusOnWebView();
-    window.focusedContent = window.content.webContents;
-  });
-
-  // Toolbar search-engine IPC (07-02)
-  ipcMain.handle('toolbar:get-search-engine', () => features.searchEngine);
+  const window = await createWindow(getWindowSize(), INITIAL_URL);
+  // First paint of the row-0 bar (its URL arrives with the navigation events).
+  redrawBar(window);
 });

@@ -4,7 +4,6 @@ import { $, type Subprocess } from 'bun';
 import { options, possibleOptions } from '../args';
 import { RESOLVED_CONFIG_ENV } from '../config';
 import { getDisplayScale } from '../dpi';
-import { colorsToTailwind, queryColors } from './kittyColors';
 import { beginLaunch, fatal, logDiagnostic, resolveRoot } from './launch';
 import { loadConfig } from './config';
 
@@ -105,7 +104,7 @@ if (!isRelease) {
 
   {
     const { success } = await Bun.build({
-      entrypoints: [join(root, 'src/index.ts'), join(root, 'src/preload.js')],
+      entrypoints: [join(root, 'src/index.ts')],
       outdir: appDir,
       root: join(root, 'src'),
       target: 'node',
@@ -136,68 +135,9 @@ if (!isRelease) {
       join(extensionPreloadDir, 'chrome-extension-api.preload.js'),
     );
   }
-
-  const version = require(join(root, 'package.json')).version;
-  const distVersion = Bun.file(join(appDir, 'version'));
-
-  if (!(await distVersion.exists()) || (await distVersion.text()) !== version || options.rebuild) {
-    logDiagnostic('building toolbar');
-    let didQueryColors = false;
-    const isTTY = process.stdout.isTTY && process.stdin.isTTY;
-    let warned = false; // only log once, and suppress when not a TTY
-    for (let tries = 0; !didQueryColors && tries < 3; tries++) {
-      try {
-        if (process.stdin.isTTY) process.stdin.setRawMode(true);
-        const colors = await queryColors();
-        if (process.stdin.isTTY) process.stdin.setRawMode(false);
-        if (!colors) {
-          if (isTTY && !warned) {
-            logDiagnostic('Failed to query terminal colors');
-            warned = true;
-          }
-        } else {
-          await Bun.write(join(appDir, 'kitty.css'), colorsToTailwind(colors));
-          didQueryColors = true;
-        }
-      } catch {
-        if (isTTY && !warned) {
-          logDiagnostic('Failed to query terminal colors');
-          warned = true;
-        }
-        if (process.stdin.isTTY) process.stdin.setRawMode(false);
-      }
-    }
-    // TODO: figure out why this isn't reliable for some users
-    if (!didQueryColors) {
-      // empty placeholder required for building in case of failure
-      await Bun.write(join(appDir, 'kitty.css'), '');
-    }
-
-    try {
-      await $`bun ${join(root, 'node_modules/vite/bin/vite.js')} build`.cwd(
-        join(root, 'src/runner'),
-      );
-    } catch (e) {
-      const e_ = e as { stderr?: { toString(): string } };
-      fatal(e_.stderr?.toString() ?? String(e));
-    }
-
-    distVersion.write(version);
-  }
 }
 
 const children: [string, Subprocess][] = [];
-const isDev = options.dev;
-
-// Vite is a dev-only dependency and is not shipped in the release tarball, so the
-// dev server must not be imported at startup: static import would require `vite`
-// even when not in dev (09-02 Task 2).
-let stopDevServer: (() => void) | undefined;
-if (isDev) {
-  const { server } = await import('./devServer');
-  await server.listen();
-  stopDevServer = () => server.close();
-}
 
 // Load and resolve config (09-04, option-a). The runner parses TOML and writes
 // normalized JSON for Electron; Electron reads via AWRIT_CONFIG_JSON.
@@ -303,10 +243,6 @@ function destroySubprocess(name: string, child: Subprocess) {
 function destroyAllSubprocesses() {
   for (const [name, child] of children) {
     destroySubprocess(name, child);
-  }
-  if (isDev) {
-    logDiagnostic('stopping dev server');
-    stopDevServer?.();
   }
   process.exit(0);
 }

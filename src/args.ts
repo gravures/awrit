@@ -10,7 +10,6 @@ export const possibleOptions = {
   transparent: { short: 't', description: 'Make the window transparent' },
   'debug-paint': { short: 'p', description: 'Debug paint' },
   'tmux-dump': { short: 'm', description: 'Dump tmux graphics and placeholder output to /tmp' },
-  rebuild: { short: 'r', description: 'Rebuild the toolbar' },
   config: { short: 'c', description: 'Path to config.toml file', string: true },
 } as const;
 
