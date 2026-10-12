@@ -1,4 +1,5 @@
-import { type ComponentProps, createSignal, Show, splitProps } from 'solid-js';
+import { type ComponentProps, createSignal, Show, splitProps, onMount } from 'solid-js';
+import { isProbablyURL, normalizeURL } from '../../url';
 
 export interface NavigationState {
   canGoBack: boolean;
@@ -56,9 +57,26 @@ export function Toolbar() {
     canGoForward: false,
   });
   const [matchCase, setMatchCase] = createSignal(false);
+  const [searchEngine, setSearchEngine] = createSignal('https://duckduckgo.com/?q=');
 
   let inputRef: HTMLInputElement | undefined;
   let findInputRef: HTMLInputElement | undefined;
+
+  // Listen for toolbar focus/blur IPC from main process
+  onMount(async () => {
+    const engine = await window.ipc.getSearchEngine();
+    setSearchEngine(engine);
+    window.ipc.onFocusUrl(() => {
+      inputRef?.focus();
+      inputRef?.select();
+    });
+    window.ipc.onBlurUrl(() => {
+      inputRef?.blur();
+    });
+    window.ipc.onSearchEngineChanged((engine: string) => {
+      setSearchEngine(engine);
+    });
+  });
 
   window.ipc.onLoadingStarted(() => setIsLoading(true));
   window.ipc.onLoadingStopped(() => setIsLoading(false));
@@ -86,9 +104,14 @@ export function Toolbar() {
     if (e.key === 'Enter') {
       let targetUrl = (e.currentTarget as HTMLInputElement).value.trim();
 
-      // Add https:// if no protocol is specified
-      if (!/^https?:\/\//i.test(targetUrl)) {
-        targetUrl = 'https://' + targetUrl;
+      if (!targetUrl) return;
+
+      // Check if it's a valid URL, otherwise use search fallback
+      if (isProbablyURL(targetUrl)) {
+        targetUrl = normalizeURL(targetUrl);
+      } else {
+        // Search fallback - use configured search engine
+        targetUrl = searchEngine() + encodeURIComponent(targetUrl);
       }
 
       window.ipc.navigateTo(targetUrl);

@@ -2,6 +2,7 @@ import { exec } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { features } from './features';
 import type { ActionRegistry, KeyBindingEvent } from './keybindings';
 
 /**
@@ -143,6 +144,16 @@ function find({ view }: KeyBindingEvent) {
   view.content.blurWebView();
   view.toolbar.focusOnWebView();
   view.focusedContent = view.toolbar.webContents;
+}
+
+/** Focus the URL bar. Sets `toolbarFocused` so Esc in `inputHandler` returns to the page. */
+function focusUrl({ view }: KeyBindingEvent) {
+  if (!view) return;
+  view.content.blurWebView();
+  view.toolbar.focusOnWebView();
+  view.focusedContent = view.toolbar.webContents;
+  view.toolbar.webContents.send('toolbar:focus-url');
+  features.toolbarFocused = true;
 }
 
 function selectAll({ view }: KeyBindingEvent) {
@@ -302,6 +313,7 @@ export const actions: ActionRegistry = {
   forward,
   refresh,
   find,
+  'focus-url': focusUrl,
   'select-all': selectAll,
   'zoom-in': zoomIn,
   'zoom-out': zoomOut,

@@ -80,6 +80,12 @@ describe('config schema', () => {
     }
   });
 
+  test('the generated file records the focus-url keybinding', () => {
+    const parsed = Bun.TOML.parse(generateToml());
+    const bindings = parsed.keybindings as Record<string, string>;
+    expect(bindings['<C-o>']).toBe('focus-url');
+  });
+
   test('defaults build from the declaration, not a second copy', () => {
     expect(defaultConfig()).toEqual(normalizeConfig({}).config);
   });

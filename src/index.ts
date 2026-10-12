@@ -8,7 +8,7 @@ import {
 } from './native';
 import * as out from './tty/output';
 import { handleInput } from './inputHandler';
-import { createWindowWithToolbar } from './windows';
+import { createWindowWithToolbar, focusedView } from './windows';
 import { console_ } from './console';
 import { options } from './args';
 import { features } from './features';
@@ -47,6 +47,7 @@ function loadConfig(config: AwritConfig) {
   homepage = config.homepage;
   setRasterScale(config.rasterScale);
   setSharedTexture(config.sharedTexture);
+  features.searchEngine = config.searchEngine;
   const { unknown } = loadKeyBindings({ keybindings: config.keybindings }, actions);
   for (const name of unknown) {
     console_.error(`Unknown keybinding action: "${name}"`);
@@ -86,6 +87,11 @@ function reloadConfig() {
   try {
     loadConfig(cfg);
     lastGoodConfig = cfg;
+    // Send updated searchEngine to toolbar
+    const window = focusedView.current;
+    if (window?.toolbar?.webContents) {
+      window.toolbar.webContents.send('toolbar:search-engine-changed', cfg.searchEngine);
+    }
   } catch (e) {
     console_.error('Error applying config, keeping last good:', e);
     loadConfig(lastGoodConfig);
@@ -252,4 +258,7 @@ app.whenReady().then(async () => {
     window.content.focusOnWebView();
     window.focusedContent = window.content.webContents;
   });
+
+  // Toolbar search-engine IPC (07-02)
+  ipcMain.handle('toolbar:get-search-engine', () => features.searchEngine);
 });

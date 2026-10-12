@@ -9,6 +9,7 @@ import {
 import { invalidatePaneSizeCache, isTmuxSession } from './tty/tmux';
 import { getRasterScale } from './raster';
 import { focusedView, setTerminalIsFocused, updateFrameRates } from './windows';
+import { features } from './features';
 
 const WHEEL_DELTA = 100;
 
@@ -162,8 +163,23 @@ function handleInputEvent(evt: TermEvent) {
         return;
       }
 
-      const webContents = view.focusedContent;
       const { code: keyCode, modifiers, down, isCharEvent } = evt.keyEvent as KeyEvent;
+
+      // Escape returns focus from the toolbar to the page. Only while the URL bar
+      // holds focus, so Esc otherwise reaches the page. (`<C-o>` focuses it via
+      // the `focus-url` action in `config.toml`.)
+      if (keyCode === 'escape' && down && features.toolbarFocused) {
+        if (view) {
+          view.content.focusOnWebView();
+          view.toolbar.blurWebView();
+          view.focusedContent = view.content.webContents;
+          features.toolbarFocused = false;
+          view.toolbar.webContents.send('toolbar:blur-url');
+          return;
+        }
+      }
+
+      const webContents = view.focusedContent;
 
       if (isCharEvent && down) {
         webContents.sendInputEvent({

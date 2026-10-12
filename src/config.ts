@@ -28,6 +28,7 @@ export interface RawConfig {
   homepage?: string;
   rasterScale?: number;
   sharedTexture?: boolean;
+  searchEngine?: string;
   keybindings?: RawKeybindings;
 }
 
@@ -36,6 +37,7 @@ export interface AwritConfig {
   homepage: string;
   rasterScale: number;
   sharedTexture: boolean;
+  searchEngine: string;
   keybindings: Record<string, string>;
 }
 
@@ -59,6 +61,9 @@ export const DEFAULT_KEYBINDINGS: RawKeybindings = {
   '<C-[>': 'back',
   '<C-r>': 'refresh',
   '<C-f>': 'find',
+  // Ctrl-O ("open") focuses the URL bar. A bare `o`/`g` would swallow that
+  // letter while typing in a page — awrit has no command mode yet.
+  '<C-o>': 'focus-url',
   '<C-a>': 'select-all',
   '<A-=>': 'zoom-in',
   '<A-minus>': 'zoom-out',
@@ -91,6 +96,12 @@ export const CONFIG_OPTIONS: ConfigOption[] = [
     doc:
       'GPU shared-texture paint path for the fallback renderer (Ghostty outside tmux). Removes ' +
       'the CPU pixel read; gateable for comparison.',
+  },
+  {
+    key: 'searchEngine',
+    type: 'string',
+    default: 'https://duckduckgo.com/?q=',
+    doc: 'Search engine URL template. Use {q} for the query (URL-encoded).',
   },
   {
     key: 'keybindings',

@@ -5,13 +5,34 @@ import {
   normalizeTmuxMouseCoordinates,
 } from './tty/mouseCoordinates';
 
+// Stub console for debug logging
+mock.module('./console', () => ({
+  console_: {
+    log: () => {},
+    error: () => {},
+  },
+}));
+
 // inputHandler imports windows.ts (electron); stub it so the pure wheel helper is testable
 mock.module('./windows', () => ({
   focusedView: { current: null },
   setTerminalIsFocused: () => {},
   updateFrameRates: () => {},
 }));
+
+// Stub features for keybinding tests
+mock.module('./features', () => ({
+  features: {
+    current: undefined,
+    toolbarFocused: false,
+    searchEngine: 'https://duckduckgo.com/?q=',
+  },
+}));
+
 const { buildWheelEvent, shouldSendMouseMove, sanitizePaste } = await import('./inputHandler');
+const { loadKeyBindings } = await import('./keybindings');
+const { actions } = await import('./actions');
+const { DEFAULT_KEYBINDINGS } = await import('./config');
 
 describe('buildWheelEvent', () => {
   test('scrollUp/scrollDown produce Y-only wheel deltas', () => {
@@ -168,5 +189,191 @@ describe('sanitizePaste', () => {
 
   test('preserves Unicode, tabs, newlines', () => {
     expect(sanitizePaste('hello\tworld\n🎉')).toBe('hello\tworld\n🎉');
+  });
+});
+
+describe('inputHandler keybinding: focus-url focuses toolbar', () => {
+  test('ctrl+o focuses toolbar', async () => {
+    const { focusedView } = await import('./windows');
+    const { features } = await import('./features');
+    const { handleInput } = await import('./inputHandler');
+
+    const mockToolbar = {
+      webContents: {
+        focus: mock(() => {}),
+        send: mock(() => {}),
+      },
+      focusOnWebView: mock(() => {}),
+    };
+    const mockContent = {
+      webContents: {
+        sendInputEvent: mock(() => {}),
+      },
+      focusOnWebView: mock(() => {}),
+      blurWebView: mock(() => {}),
+    };
+    const mockView = {
+      toolbar: mockToolbar,
+      content: mockContent,
+      focusedContent: mockContent.webContents,
+    };
+
+    focusedView.current = mockView;
+    features.toolbarFocused = false;
+    loadKeyBindings({ keybindings: DEFAULT_KEYBINDINGS }, actions);
+
+    // `focus-url` is bound to ctrl+o in the shipped defaults
+    const evt = {
+      eventType: 'key',
+      keyEvent: {
+        code: 'o',
+        modifiers: ['ctrl'],
+        down: true,
+        isCharEvent: false,
+      },
+    } as any;
+
+    handleInput(evt);
+
+    expect(mockContent.blurWebView).toHaveBeenCalled();
+    expect(mockToolbar.focusOnWebView).toHaveBeenCalled();
+    expect(mockToolbar.webContents.send).toHaveBeenCalledWith('toolbar:focus-url');
+    expect(features.toolbarFocused).toBe(true);
+    expect(mockView.focusedContent).toBe(mockToolbar.webContents);
+  });
+
+  test('bare o does not focus toolbar (it reaches the page)', async () => {
+    const { focusedView } = await import('./windows');
+    const { features } = await import('./features');
+    const { handleInput } = await import('./inputHandler');
+
+    const mockToolbar = {
+      webContents: {
+        focus: mock(() => {}),
+        send: mock(() => {}),
+      },
+    };
+    const mockContent = {
+      webContents: {
+        sendInputEvent: mock(() => {}),
+      },
+      focusOnWebView: mock(() => {}),
+      blurWebView: mock(() => {}),
+    };
+    const mockView = {
+      toolbar: mockToolbar,
+      content: mockContent,
+      focusedContent: mockContent.webContents,
+    };
+
+    focusedView.current = mockView;
+    features.toolbarFocused = false;
+    loadKeyBindings({ keybindings: DEFAULT_KEYBINDINGS }, actions);
+
+    const evt = {
+      eventType: 'key',
+      keyEvent: {
+        code: 'o',
+        modifiers: [],
+        down: true,
+        isCharEvent: false,
+      },
+    } as any;
+
+    handleInput(evt);
+
+    expect(mockToolbar.webContents.focus).not.toHaveBeenCalled();
+    expect(features.toolbarFocused).toBe(false);
+  });
+});
+
+describe('inputHandler keybinding: escape returns focus to page', () => {
+  test('escape key when toolbar focused returns focus to page', async () => {
+    const { focusedView } = await import('./windows');
+    const { features } = await import('./features');
+    const { handleInput } = await import('./inputHandler');
+
+    const mockToolbar = {
+      webContents: {
+        send: mock(() => {}),
+      },
+      blurWebView: mock(() => {}),
+    };
+    const mockContent = {
+      webContents: {
+        sendInputEvent: mock(() => {}),
+      },
+      focusOnWebView: mock(() => {}),
+      blurWebView: mock(() => {}),
+    };
+    const mockView = {
+      toolbar: mockToolbar,
+      content: mockContent,
+      focusedContent: mockToolbar.webContents,
+    };
+
+    focusedView.current = mockView;
+    features.toolbarFocused = true;
+
+    const evt = {
+      eventType: 'key',
+      keyEvent: {
+        code: 'escape',
+        modifiers: [],
+        down: true,
+        isCharEvent: false,
+      },
+    } as any;
+
+    handleInput(evt);
+
+    expect(mockContent.focusOnWebView).toHaveBeenCalled();
+    expect(mockToolbar.blurWebView).toHaveBeenCalled();
+    expect(features.toolbarFocused).toBe(false);
+    expect(mockToolbar.webContents.send).toHaveBeenCalledWith('toolbar:blur-url');
+    expect(mockView.focusedContent).toBe(mockContent.webContents);
+  });
+
+  test('escape key when toolbar not focused does nothing', async () => {
+    const { focusedView } = await import('./windows');
+    const { features } = await import('./features');
+    const { handleInput } = await import('./inputHandler');
+
+    const mockToolbar = {
+      webContents: {
+        send: mock(() => {}),
+      },
+      blurWebView: mock(() => {}),
+    };
+    const mockContent = {
+      webContents: {
+        sendInputEvent: mock(() => {}),
+      },
+      focusOnWebView: mock(() => {}),
+      blurWebView: mock(() => {}),
+    };
+    const mockView = {
+      toolbar: mockToolbar,
+      content: mockContent,
+      focusedContent: mockContent.webContents,
+    };
+
+    focusedView.current = mockView;
+    features.toolbarFocused = false;
+
+    const evt = {
+      eventType: 'key',
+      keyEvent: {
+        code: 'escape',
+        modifiers: [],
+        down: true,
+        isCharEvent: false,
+      },
+    } as any;
+
+    handleInput(evt);
+
+    expect(mockContent.focusOnWebView).not.toHaveBeenCalled();
+    expect(mockToolbar.blurWebView).not.toHaveBeenCalled();
   });
 });

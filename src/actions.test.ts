@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { actions } from './actions';
+import { DEFAULT_KEYBINDINGS } from './config';
 import { handleEvent, loadKeyBindings } from './keybindings';
 import type { TermEvent } from './native';
 
@@ -9,6 +10,7 @@ const DEFAULT_ACTIONS = [
   'forward',
   'refresh',
   'find',
+  'focus-url',
   'zoom-in',
   'zoom-out',
   'zoom-reset',
@@ -50,5 +52,24 @@ describe('action registry', () => {
   test('an unknown name is reported, not silently dropped', () => {
     const { unknown } = loadKeyBindings({ keybindings: { '<C-r>': 'nope' } }, actions);
     expect(unknown).toEqual(['nope']);
+  });
+
+  test('the default focus binding fires on ctrl+o', () => {
+    let fired = 0;
+    const registry = {
+      ...actions,
+      'focus-url': () => {
+        fired++;
+      },
+    };
+    const { unknown } = loadKeyBindings({ keybindings: DEFAULT_KEYBINDINGS }, registry);
+    expect(unknown).toEqual([]);
+
+    const event: TermEvent = {
+      eventType: 'key',
+      keyEvent: { code: 'o', modifiers: ['ctrl'], down: true, isCharEvent: false },
+    };
+    expect(handleEvent(event)).toBe(true);
+    expect(fired).toBe(1);
   });
 });
