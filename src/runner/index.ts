@@ -143,7 +143,7 @@ const children: [string, Subprocess][] = [];
 // normalized JSON for Electron; Electron reads via AWRIT_CONFIG_JSON.
 let configJsonPath: string;
 let configPath: string;
-let lastSeenConfigMtime = 0;
+let configSources: string[] = [];
 try {
   const res = loadConfig({
     cwd: process.cwd(),
@@ -151,44 +151,54 @@ try {
   });
   configJsonPath = res.jsonPath;
   configPath = res.configPath;
-  lastSeenConfigMtime = fs.statSync(configPath).mtimeMs;
+  configSources = res.sources;
+  logDiagnostic(
+    `config: using ${configSources.length ? configSources.join(' + ') : configPath}`,
+  );
   for (const key of res.unknownKeys) {
-    logDiagnostic(`config: ignoring unknown option "${key}" in ${res.configPath}`);
+    logDiagnostic(`config: ignoring unknown option "${key}"`);
   }
 } catch (e) {
   fatal((e as Error).message);
 }
 
-// Hot-reload: watch the config DIRECTORY, not the file — editors that save via
-// rename-replace (and our own tmp+rename of the JSON) leave a file-level watch
-// pointing at a deleted inode. The mtime check keeps unrelated changes in the
-// same directory from being parsed, and an invalid file is attempted once per
-// edit: the last good config stays active and the reason is logged.
+// Hot-reload: watch every merged config DIRECTORY, not the file — editors that
+// save via rename-replace (and our own tmp+rename of the JSON) leave a
+// file-level watch pointing at a deleted inode. The per-file mtime check keeps
+// unrelated changes in the same directory from being parsed, and an invalid
+// file is attempted once per edit: the last good config stays active and the
+// reason is logged.
 try {
-  const configDir = dirname(configPath);
-  const configName = basename(configPath);
-  fs.watch(configDir, (_event, filename) => {
-    if (filename && filename !== configName) return;
-    let mtime: number;
-    try {
-      mtime = fs.statSync(configPath).mtimeMs;
-    } catch {
-      return; // mid-save rename; the next event sees the new file
-    }
-    if (mtime === lastSeenConfigMtime) return;
-    lastSeenConfigMtime = mtime;
-    try {
-      const res = loadConfig({
-        cwd: process.cwd(),
-        argvConfig: options.config,
-      });
-      configJsonPath = res.jsonPath;
-      logDiagnostic(`reloaded config from ${configPath}`);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      logDiagnostic(`config reload failed, keeping last good: ${msg}`);
-    }
-  });
+  const watchedDirs = [...new Set(configSources.map((p) => dirname(p)))];
+  const seenMtimes = new Map<string, number>();
+  for (const configDir of watchedDirs) {
+    fs.watch(configDir, (_event, filename) => {
+      const source = configSources.find((p) => basename(p) === filename);
+      if (!filename || !source) return;
+      let mtime: number;
+      try {
+        mtime = fs.statSync(source).mtimeMs;
+      } catch {
+        return; // mid-save rename; the next event sees the new file
+      }
+      if (seenMtimes.get(source) === mtime) return;
+      seenMtimes.set(source, mtime);
+      try {
+        const res = loadConfig({
+          cwd: process.cwd(),
+          argvConfig: options.config,
+        });
+        configJsonPath = res.jsonPath;
+        configSources = res.sources;
+        logDiagnostic(
+          `reloaded config from ${res.sources.length ? res.sources.join(' + ') : res.configPath}`,
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        logDiagnostic(`config reload failed, keeping last good: ${msg}`);
+      }
+    });
+  }
 } catch (e) {
   logDiagnostic(`fs.watch unavailable for config: ${e instanceof Error ? e.message : String(e)}`);
 }

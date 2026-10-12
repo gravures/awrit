@@ -4,6 +4,7 @@ import {
   DEFAULT_KEYBINDINGS,
   defaultConfig,
   generateToml,
+  mergeConfigs,
   normalizeConfig,
 } from './config';
 import { actions } from './actions';
@@ -81,10 +82,64 @@ describe('config schema', () => {
     }
   });
 
-  test('the generated file records the focus-url keybinding', () => {
+  test('the generated file records the focus-url keybinding (action on the left)', () => {
     const parsed = Bun.TOML.parse(generateToml());
     const bindings = parsed.keybindings as Record<string, string>;
-    expect(bindings['<C-o>']).toBe('focus-url');
+    expect(bindings['focus-url']).toBe('<C-o>');
+    expect(Object.keys(bindings)).not.toContain('<C-o>');
+  });
+
+  test('an action-first keybindings table loads as keybinding -> action', () => {
+    const { config, unknownKeys } = normalizeConfig({
+      keybindings: { forward: '<C-]>', back: '<C-[>' },
+    } as never);
+    expect(unknownKeys).toEqual([]);
+    expect(config.keybindings).toEqual({ '<C-]>': 'forward', '<C-[>': 'back' });
+  });
+
+  test('an action-first table with multiple keys per action (arrays) loads too', () => {
+    const { config } = normalizeConfig({
+      keybindings: { back: ['<C-[>', '<Mouse4>'], forward: ['<C-]>', '<Mouse5>'] },
+    } as never);
+    expect(config.keybindings).toEqual({
+      '<C-[>': 'back',
+      '<Mouse4>': 'back',
+      '<C-]>': 'forward',
+      '<Mouse5>': 'forward',
+    });
+  });
+
+  test('a legacy keybinding-first table still loads unchanged', () => {
+    const { config } = normalizeConfig({
+      keybindings: { '<C-]>': 'forward', '<C-[>': 'back' },
+    } as never);
+    expect(config.keybindings).toEqual({ '<C-]>': 'forward', '<C-[>': 'back' });
+  });
+
+  test('mergeConfigs: a more specific layer wins per scalar key', () => {
+    const merged = mergeConfigs([
+      defaultConfig(),
+      { rasterScale: 3 } as never,
+      { rasterScale: 4 } as never,
+    ]);
+    expect(merged.rasterScale).toBe(4);
+    expect(merged.homepage).toBe(defaultConfig().homepage);
+    expect(merged.barTheme).toBe(defaultConfig().barTheme);
+  });
+
+  test('mergeConfigs: keybindings merge per binding, an override unmaps nothing else', () => {
+    const merged = mergeConfigs([
+      { keybindings: { back: ['<C-[>', '<Mouse4>'], forward: ['<C-]>', '<Mouse5>'] } } as never,
+      { keybindings: { back: '<C-b>', find: '<C-f>' } } as never,
+    ]);
+    expect(merged.keybindings).toEqual({
+      '<C-[>': 'back',
+      '<Mouse4>': 'back',
+      '<C-b>': 'back',
+      '<C-]>': 'forward',
+      '<Mouse5>': 'forward',
+      '<C-f>': 'find',
+    });
   });
 
   test('the generated file records the barTheme default', () => {

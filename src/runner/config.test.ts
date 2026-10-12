@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { defaultConfig, normalizeConfig } from '../config';
+import { normalizeConfig } from '../config';
 import { loadConfig, resolveConfigPath } from './config';
 
 // Real temp directories only: no mock, no real ~/.config or XDG touched.
@@ -64,7 +64,9 @@ describe('config resolution', () => {
     expect(fs.existsSync(configPath)).toBe(true);
 
     const parsed = Bun.TOML.parse(fs.readFileSync(configPath, 'utf8'));
-    expect(parsed).toEqual(defaultConfig());
+    // The generated file is action-first on the left; loading it resolves to
+    // the same keybinding -> action map as starting from an empty config.
+    expect(normalizeConfig(parsed as never).config).toEqual(normalizeConfig({}).config);
   });
 
   test('loadConfig normalizes and writes the resolved JSON Electron reads', () => {
@@ -80,6 +82,66 @@ describe('config resolution', () => {
     expect(res.jsonPath).toBe(join(state, 'config.json'));
     const written = JSON.parse(fs.readFileSync(res.jsonPath, 'utf8'));
     expect(written).toEqual(res.config);
+  });
+
+  test('a cwd scalar overrides the XDG one (layered merge, not pick-one)', () => {
+    fs.mkdirSync(join(xdg, 'awrit'), { recursive: true });
+    fs.writeFileSync(join(xdg, 'awrit', 'config.toml'), 'rasterScale = 2\nhomepage = "from-xdg"');
+    fs.writeFileSync(join(cwd, 'config.toml'), 'rasterScale = 4');
+
+    const res = loadConfig({ cwd, envXdgConfigHome: xdg, stateDir: state });
+
+    expect(res.config.rasterScale).toBe(4);
+    expect(res.config.homepage).toBe('from-xdg');
+    expect(res.sources).toEqual([join(xdg, 'awrit', 'config.toml'), join(cwd, 'config.toml')]);
+  });
+
+  test('keybindings merge across layers: one override keeps the rest', () => {
+    fs.mkdirSync(join(xdg, 'awrit'), { recursive: true });
+    fs.writeFileSync(
+      join(xdg, 'awrit', 'config.toml'),
+      '[keybindings]\nback = ["<C-[>", "<Mouse4>"]\nforward = ["<C-]>", "<Mouse5>"]',
+    );
+    fs.writeFileSync(join(cwd, 'config.toml'), '[keybindings]\nforward = "<C-x>"');
+
+    const res = loadConfig({ cwd, envXdgConfigHome: xdg, stateDir: state });
+
+    expect(res.config.keybindings['<C-x>']).toBe('forward'); // the override
+    expect(res.config.keybindings['<C-]>']).toBe('forward'); // untouched from XDG
+    expect(res.config.keybindings['<Mouse5>']).toBe('forward');
+    expect(res.config.keybindings['<C-[>']).toBe('back'); // untouched from XDG
+    expect(res.config.keybindings['<Mouse4>']).toBe('back');
+  });
+
+  test('a setting present only in XDG wins over the default, not the other way', () => {
+    fs.mkdirSync(join(xdg, 'awrit'), { recursive: true });
+    fs.writeFileSync(join(xdg, 'awrit', 'config.toml'), 'barTheme = "dark"');
+
+    const res = loadConfig({ cwd, envXdgConfigHome: xdg, stateDir: state });
+
+    expect(res.sources).toEqual([join(xdg, 'awrit', 'config.toml')]);
+    expect(res.config.barTheme).toBe('dark');
+  });
+
+  test('a removed XDG config is regenerated even when a cwd config exists', () => {
+    fs.writeFileSync(join(cwd, 'config.toml'), 'homepage = "from-cwd"');
+
+    expect(resolveConfigPath(opts())).toBe(join(cwd, 'config.toml'));
+
+    const regenerated = join(xdg, 'awrit', 'config.toml');
+    expect(fs.existsSync(regenerated)).toBe(true);
+    const parsed = Bun.TOML.parse(fs.readFileSync(regenerated, 'utf8'));
+    expect(normalizeConfig(parsed as never).config).toEqual(normalizeConfig({}).config);
+  });
+
+  test('loading merges the regenerated XDG default under the cwd overrides', () => {
+    fs.writeFileSync(join(cwd, 'config.toml'), 'rasterScale = 4');
+
+    const res = loadConfig({ cwd, envXdgConfigHome: xdg, stateDir: state });
+
+    expect(res.sources).toEqual([join(xdg, 'awrit', 'config.toml'), join(cwd, 'config.toml')]);
+    expect(res.config.rasterScale).toBe(4);
+    expect(res.config.keybindings).toEqual(normalizeConfig({}).config.keybindings);
   });
 
   test('an invalid TOML file fails with the file and the reason', () => {

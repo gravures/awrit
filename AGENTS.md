@@ -23,7 +23,7 @@ Terminal web browser via Kitty graphics protocol with tmux passthrough support. 
   - `mouseCoordinates.ts` — cell vs pixel normalization. Override via env `AWRIT_TMUX_MOUSE_COORDS=cell|pixel`.
 - Rust native: `awrit-native-rs/` NAPI bindings for terminal I/O, tmux passthrough, shared memory.
 - Paint flow: `src/paint.ts` routes Electron paint events to `TmuxRenderer` or `kittyGraphics.ts`.
-- Config hot-reload: `config.toml` — resolved by the runner (`--config` → `./config.toml` → `$XDG_CONFIG_HOME/awrit/config.toml`, generated on first start); TOML is parsed in the runner and handed to Electron as JSON via `AWRIT_CONFIG_JSON`. Changes to the active file propagate without restart; invalid edits keep the last good config and log the reason.
+- Config hot-reload: `config.toml` layers merge built-in defaults → `$XDG_CONFIG_HOME/awrit/config.toml` → `./config.toml` → `--config` (per key; keybindings merge per binding, so a single shortcut override never unmaps the rest); the default file is regenerated into XDG whenever it is missing, even when a cwd config exists. TOML is parsed in the runner and handed to Electron as JSON via `AWRIT_CONFIG_JSON`. Changes to any active layer propagate without restart; invalid edits keep the last good config and log the reason.
 - Config machinery: `src/config.ts` (option schema, defaults, TOML generator, validation) and `src/runner/config.ts` (resolve, parse, write the JSON); `src/actions.ts` is the keybinding action registry that config names reference.
 
 ## tmux requirements

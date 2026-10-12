@@ -21,7 +21,7 @@ function electronApi(): typeof import('electron') {
  *
  * These used to live inside the shipped `config.js`, which meant every user
  * config carried application code. They now live here and are addressed by
- * name, so a `config.toml` binding is data (`"<C-r>" = "refresh"`) instead of
+ * name, so a `config.toml` binding is data (`refresh = "<C-r>"`) instead of
  * a closure. Behaviour is unchanged from the old default — only the location
  * and the names are new.
  */

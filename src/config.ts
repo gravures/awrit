@@ -21,7 +21,7 @@ export const CONFIG_FILE_NAME = 'config.json';
 export const CONFIG_TOML_NAME = 'config.toml';
 
 export interface RawKeybindings {
-  [key: string]: string | undefined;
+  [key: string]: string | string[] | undefined;
 }
 
 export interface RawConfig {
@@ -117,7 +117,7 @@ export const CONFIG_OPTIONS: ConfigOption[] = [
     key: 'keybindings',
     type: 'table',
     default: DEFAULT_KEYBINDINGS,
-    doc: 'Key sequence -> action name. Pressing a key runs the named action.',
+    doc: 'Action name -> key sequence (or a list of keys). Pressing a key runs the named action.',
   },
 ];
 
@@ -135,6 +135,11 @@ function tomlValue(value: unknown): string {
     return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
   }
   return String(value);
+}
+
+/** A TOML key: bare when it is a plain identifier, quoted otherwise. */
+function tomlKey(value: string): string {
+  return /^[A-Za-z0-9_-]+$/.test(value) ? value : tomlValue(value);
 }
 
 /**
@@ -162,8 +167,20 @@ export function generateToml(config: RawConfig = defaultConfig()): string {
     lines.push(`# ${opt.doc}`);
     lines.push(`# Actions: ${Object.keys(actions).join(', ')}`);
     lines.push('[keybindings]');
+    // Group by action: a plain TOML table cannot hold the same key twice, and
+    // one action can bind several keys (the mouse buttons share back/forward).
+    const byAction = new Map<string, string[]>();
     for (const [key, value] of Object.entries(table)) {
-      if (typeof value === 'string') lines.push(`${tomlValue(key)} = ${tomlValue(value)}`);
+      if (typeof value === 'string') {
+        const bindings = byAction.get(value) ?? [];
+        bindings.push(key);
+        byAction.set(value, bindings);
+      }
+    }
+    for (const [action, bindings] of byAction) {
+      const keys = bindings.map((k) => tomlValue(k));
+      const value = bindings.length === 1 ? keys[0] : `[${keys.join(', ')}]`;
+      lines.push(`${tomlKey(action)} = ${value}`);
     }
     lines.push('');
   }
@@ -174,6 +191,51 @@ export function generateToml(config: RawConfig = defaultConfig()): string {
 export interface NormalizedConfig {
   config: AwritConfig;
   unknownKeys: string[];
+}
+
+/**
+ * Generated files write `forward = "<C-]>"` or `back = ["<C-[>", "<Mouse4>"]`
+ * (action on the left, one or more keys); files from before that wrote
+ * `<C-]> = "forward"`. A table whose every key is a registered action is
+ * action-first — flip it to the internal keybinding -> action shape.
+ */
+function normalizeKeybindings(table: RawKeybindings): Record<string, string> {
+  const entries: Array<[string, string | string[]]> = [];
+  for (const [k, v] of Object.entries(table)) {
+    if (typeof v === 'string' || Array.isArray(v)) entries.push([k, v]);
+  }
+  const actionFirst = entries.length > 0 && entries.every(([k]) => k in actions);
+  const out: Record<string, string> = {};
+  for (const [k, v] of entries) {
+    if (actionFirst) {
+      for (const binding of Array.isArray(v) ? v : [v]) {
+        out[binding] = k;
+      }
+    } else if (typeof v === 'string') {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+/**
+ * Merge config layers from least to most specific (built-in defaults -> XDG ->
+ * ./config.toml -> --config). A scalar set by a more specific layer wins;
+ * keybindings merge per binding, so overriding one shortcut never unmaps the
+ * rest. An explicitly empty keybindings table contributes nothing.
+ */
+export function mergeConfigs(raws: RawConfig[]): RawConfig {
+  const out: Record<string, unknown> = {};
+  const keys: Record<string, string> = {};
+  for (const raw of raws) {
+    for (const [key, value] of Object.entries(raw)) {
+      if (key === 'keybindings' || value === undefined) continue;
+      out[key] = value;
+    }
+    if (raw.keybindings !== undefined) Object.assign(keys, normalizeKeybindings(raw.keybindings));
+  }
+  out.keybindings = keys;
+  return out as RawConfig;
 }
 
 /**
@@ -201,10 +263,16 @@ export function normalizeConfig(raw: RawConfig): NormalizedConfig {
         throw new Error(`${opt.key} must be a table, got ${typeof value}`);
       }
       for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-        if (typeof v !== 'string') {
-          throw new Error(`${opt.key}.${k} must be a string (an action name), got ${typeof v}`);
+        const ok =
+          typeof v === 'string' || (Array.isArray(v) && v.every((x) => typeof x === 'string'));
+        if (!ok) {
+          throw new Error(
+            `${opt.key}.${k} must be a string (a key sequence) or an array of them, got ${typeof v}`,
+          );
         }
       }
+      out[opt.key] = normalizeKeybindings(value as RawKeybindings);
+      continue;
     }
 
     out[opt.key] = value;
