@@ -30,22 +30,22 @@ describe('config schema', () => {
   test('options missing from a user file are filled from the defaults', () => {
     // A config written before a new option existed keeps working: only the
     // keys the user set are theirs, the rest come from CONFIG_OPTIONS.
-    const { config } = normalizeConfig({ homepage: 'https://example.com' });
-    expect(config.homepage).toBe('https://example.com');
-    expect(config.rasterScale).toBe(1);
-    expect(config.sharedTexture).toBe(true);
-    expect(config.barTheme).toBe('reverse');
+    const { config } = normalizeConfig({ browser: { homepage: 'https://example.com' } });
+    expect(config.browser.homepage).toBe('https://example.com');
+    expect(config.render.rasterScale).toBe(1);
+    expect(config.render.sharedTexture).toBe(true);
+    expect(config.ui.barTheme).toBe('reverse');
     expect(config.keybindings).toEqual(DEFAULT_KEYBINDINGS);
   });
 
   test('unknown keys are reported, not rejected', () => {
-    const { unknownKeys } = normalizeConfig({ homepage: 'x', futureOption: 1 } as never);
+    const { unknownKeys } = normalizeConfig({ browser: { homepage: 'x' }, futureOption: 1 } as never);
     expect(unknownKeys).toEqual(['futureOption']);
   });
 
   test('wrong types are rejected with the option name in the message', () => {
-    expect(() => normalizeConfig({ rasterScale: 'big' } as never)).toThrow(/rasterScale/);
-    expect(() => normalizeConfig({ sharedTexture: 'yes' } as never)).toThrow(/sharedTexture/);
+    expect(() => normalizeConfig({ render: { rasterScale: 'big' } } as never)).toThrow(/rasterScale/);
+    expect(() => normalizeConfig({ render: { sharedTexture: 'yes' } } as never)).toThrow(/sharedTexture/);
     expect(() => normalizeConfig({ keybindings: { '<C-r>': 5 } } as never)).toThrow(/keybindings/);
   });
 
@@ -54,23 +54,25 @@ describe('config schema', () => {
     expect(config.keybindings).toEqual({});
   });
 
-  test('adding an option to CONFIG_OPTIONS is picked up without touching the generator', () => {
+  test('adding a sub-option to a table is picked up without touching the generator', () => {
     // Locks the "clever generator" requirement: the generator and the loader
-    // read the declaration, so a new option is one entry.
-    CONFIG_OPTIONS.push({
+    // read the declaration, so a new option is one entry in subOptions.
+    const renderOpt = CONFIG_OPTIONS.find((o) => o.key === 'render');
+    if (!renderOpt || !renderOpt.subOptions) throw new Error('render table not found');
+    renderOpt.subOptions.push({
       key: 'extraThing',
       type: 'number',
       default: 7,
-      doc: 'A hypothetical future option.',
+      doc: 'A hypothetical future render option.',
     });
     try {
       const parsed = Bun.TOML.parse(generateToml());
-      expect(parsed.extraThing).toBe(7);
+      expect(parsed.render.extraThing).toBe(7);
 
       const { config } = normalizeConfig({} as never);
-      expect(config.extraThing).toBe(7);
+      expect(config.render.extraThing).toBe(7);
     } finally {
-      CONFIG_OPTIONS.pop();
+      renderOpt.subOptions.pop();
     }
   });
 
@@ -119,12 +121,12 @@ describe('config schema', () => {
   test('mergeConfigs: a more specific layer wins per scalar key', () => {
     const merged = mergeConfigs([
       defaultConfig(),
-      { rasterScale: 3 } as never,
-      { rasterScale: 4 } as never,
+      { render: { rasterScale: 3 } } as never,
+      { render: { rasterScale: 4 } } as never,
     ]);
-    expect(merged.rasterScale).toBe(4);
-    expect(merged.homepage).toBe(defaultConfig().homepage);
-    expect(merged.barTheme).toBe(defaultConfig().barTheme);
+    expect(merged.render.rasterScale).toBe(4);
+    expect(merged.browser.homepage).toBe(defaultConfig().browser.homepage);
+    expect(merged.ui.barTheme).toBe(defaultConfig().ui.barTheme);
   });
 
   test('mergeConfigs: keybindings merge per binding, an override unmaps nothing else', () => {
@@ -143,7 +145,7 @@ describe('config schema', () => {
   });
 
   test('the generated file records the barTheme default', () => {
-    expect(Bun.TOML.parse(generateToml()).barTheme).toBe('reverse');
+    expect(Bun.TOML.parse(generateToml()).ui.barTheme).toBe('reverse');
   });
 
   test('defaults build from the declaration, not a second copy', () => {

@@ -77,9 +77,7 @@ broken edit keeps the last good config and the reason goes to the log
 The file is plain data — no JavaScript is ever executed from it:
 
 ```toml
-# Page shown when no URL is given.
-homepage = "https://duckduckgo.com"
-
+[render]
 # Pane pixels divided by this is the bitmap Electron renders; 1 = 1:1 with the
 # pane. 2 = quarter of the pixels (larger text, softer edges).
 rasterScale = 1
@@ -87,9 +85,30 @@ rasterScale = 1
 # GPU shared-texture paint path for the fallback renderer (Ghostty outside tmux).
 sharedTexture = true
 
+[ui]
+# Bar colour preset: reverse, none, dark, light, accent.
+barTheme = "reverse"
+
+[browser]
+# Page shown when no URL is given. "auto" uses the searchEngine base URL.
+homepage = "auto"
+# Search engine URL template. Use {q} for the query (URL-encoded).
+searchEngine = "https://duckduckgo.com/?q="
+
 [keybindings]
-"<C-r>" = "refresh"
-"<Cmd-f>" = "find" # Cmd on macOS, Ctrl elsewhere
+# Action name -> key sequence (or list of keys). Pressing the key runs the action.
+# Actions: back, forward, refresh, find, focus-url, select-all, zoom-in, zoom-out,
+# zoom-reset, copy, paste, diagnostic-copy, quit
+forward = ["<C-]>", "<Mouse5>"]
+back = ["<C-[>", "<Mouse4>"]
+refresh = "<C-r>"
+find = "<C-f>"
+focus-url = "<C-o>"
+select-all = "<C-a>"
+zoom-in = "<A-=>"
+zoom-out = "<A-minus>"
+zoom-reset = "<A-0>"
+quit = "<C-c>"
 ```
 
 Available actions: `back`, `forward`, `refresh`, `find`, `select-all`, `zoom-in`,

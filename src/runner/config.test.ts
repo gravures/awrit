@@ -70,12 +70,12 @@ describe('config resolution', () => {
   });
 
   test('loadConfig normalizes and writes the resolved JSON Electron reads', () => {
-    fs.writeFileSync(join(cwd, 'config.toml'), 'homepage = "https://example.com"');
+    fs.writeFileSync(join(cwd, 'config.toml'), '[browser]\nhomepage = "https://example.com"');
 
     const res = loadConfig({ cwd, envXdgConfigHome: xdg, stateDir: state });
 
     expect(res.configPath).toBe(join(cwd, 'config.toml'));
-    expect(res.config.homepage).toBe('https://example.com');
+    expect(res.config.browser.homepage).toBe('https://example.com');
     // Missing options are filled from the defaults for the reader.
     expect(res.config.keybindings).toEqual(normalizeConfig({}).config.keybindings);
 
@@ -86,13 +86,13 @@ describe('config resolution', () => {
 
   test('a cwd scalar overrides the XDG one (layered merge, not pick-one)', () => {
     fs.mkdirSync(join(xdg, 'awrit'), { recursive: true });
-    fs.writeFileSync(join(xdg, 'awrit', 'config.toml'), 'rasterScale = 2\nhomepage = "from-xdg"');
-    fs.writeFileSync(join(cwd, 'config.toml'), 'rasterScale = 4');
+    fs.writeFileSync(join(xdg, 'awrit', 'config.toml'), '[render]\nrasterScale = 2\n[browser]\nhomepage = "from-xdg"');
+    fs.writeFileSync(join(cwd, 'config.toml'), '[render]\nrasterScale = 4');
 
     const res = loadConfig({ cwd, envXdgConfigHome: xdg, stateDir: state });
 
-    expect(res.config.rasterScale).toBe(4);
-    expect(res.config.homepage).toBe('from-xdg');
+    expect(res.config.render.rasterScale).toBe(4);
+    expect(res.config.browser.homepage).toBe('from-xdg');
     expect(res.sources).toEqual([join(xdg, 'awrit', 'config.toml'), join(cwd, 'config.toml')]);
   });
 
@@ -115,16 +115,16 @@ describe('config resolution', () => {
 
   test('a setting present only in XDG wins over the default, not the other way', () => {
     fs.mkdirSync(join(xdg, 'awrit'), { recursive: true });
-    fs.writeFileSync(join(xdg, 'awrit', 'config.toml'), 'barTheme = "dark"');
+    fs.writeFileSync(join(xdg, 'awrit', 'config.toml'), '[ui]\nbarTheme = "dark"');
 
     const res = loadConfig({ cwd, envXdgConfigHome: xdg, stateDir: state });
 
     expect(res.sources).toEqual([join(xdg, 'awrit', 'config.toml')]);
-    expect(res.config.barTheme).toBe('dark');
+    expect(res.config.ui.barTheme).toBe('dark');
   });
 
   test('a removed XDG config is regenerated even when a cwd config exists', () => {
-    fs.writeFileSync(join(cwd, 'config.toml'), 'homepage = "from-cwd"');
+    fs.writeFileSync(join(cwd, 'config.toml'), '[browser]\nhomepage = "from-cwd"');
 
     expect(resolveConfigPath(opts())).toBe(join(cwd, 'config.toml'));
 
@@ -135,17 +135,17 @@ describe('config resolution', () => {
   });
 
   test('loading merges the regenerated XDG default under the cwd overrides', () => {
-    fs.writeFileSync(join(cwd, 'config.toml'), 'rasterScale = 4');
+    fs.writeFileSync(join(cwd, 'config.toml'), '[render]\nrasterScale = 4');
 
     const res = loadConfig({ cwd, envXdgConfigHome: xdg, stateDir: state });
 
     expect(res.sources).toEqual([join(xdg, 'awrit', 'config.toml'), join(cwd, 'config.toml')]);
-    expect(res.config.rasterScale).toBe(4);
+    expect(res.config.render.rasterScale).toBe(4);
     expect(res.config.keybindings).toEqual(normalizeConfig({}).config.keybindings);
   });
 
   test('an invalid TOML file fails with the file and the reason', () => {
-    fs.writeFileSync(join(cwd, 'config.toml'), 'homepage = "unterminated');
+    fs.writeFileSync(join(cwd, 'config.toml'), '[browser]\nhomepage = "unterminated');
 
     expect(() => loadConfig({ cwd, envXdgConfigHome: xdg, stateDir: state })).toThrow(
       /failed to parse config TOML/,
@@ -153,7 +153,7 @@ describe('config resolution', () => {
   });
 
   test('a wrong value fails with the option name', () => {
-    fs.writeFileSync(join(cwd, 'config.toml'), 'rasterScale = "big"');
+    fs.writeFileSync(join(cwd, 'config.toml'), '[render]\nrasterScale = "big"');
 
     expect(() => loadConfig({ cwd, envXdgConfigHome: xdg, stateDir: state })).toThrow(
       /rasterScale must be a number/,
@@ -161,10 +161,10 @@ describe('config resolution', () => {
   });
 
   test('unknown options are reported and ignored', () => {
-    fs.writeFileSync(join(cwd, 'config.toml'), 'homepage = "x"\nfutureOption = 3');
+    fs.writeFileSync(join(cwd, 'config.toml'), '[browser]\nhomepage = "x"\nfutureOption = 3');
 
     const res = loadConfig({ cwd, envXdgConfigHome: xdg, stateDir: state });
-    expect(res.unknownKeys).toEqual(['futureOption']);
-    expect(res.config.homepage).toBe('x');
+    expect(res.unknownKeys).toEqual(['browser.futureOption']);
+    expect(res.config.browser.homepage).toBe('x');
   });
 });

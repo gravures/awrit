@@ -24,32 +24,51 @@ export interface RawKeybindings {
   [key: string]: string | string[] | undefined;
 }
 
-export interface RawConfig {
-  homepage?: string;
+export interface RawRenderConfig {
   rasterScale?: number;
   sharedTexture?: boolean;
-  searchEngine?: string;
+}
+
+export interface RawUiConfig {
   barTheme?: string;
+}
+
+export interface RawBrowserConfig {
+  homepage?: string;
+  searchEngine?: string;
+}
+
+export interface RawConfig {
+  render?: RawRenderConfig;
+  ui?: RawUiConfig;
+  browser?: RawBrowserConfig;
   keybindings?: RawKeybindings;
+  [key: string]: unknown;
 }
 
 /** A fully resolved config: every declared option is present. */
 export interface AwritConfig {
-  homepage: string;
-  rasterScale: number;
-  sharedTexture: boolean;
-  searchEngine: string;
-  barTheme: string;
+  render: RawRenderConfig;
+  ui: RawUiConfig;
+  browser: { homepage: string; searchEngine: string };
   keybindings: Record<string, string>;
 }
 
 export type ConfigOptionType = 'string' | 'number' | 'boolean' | 'table';
 
-export interface ConfigOption {
-  key: keyof RawConfig;
+export interface SubConfigOption {
+  key: string;
   type: ConfigOptionType;
   default: unknown;
   doc: string;
+}
+
+export interface ConfigOption {
+  key: string;
+  type: ConfigOptionType;
+  default: unknown;
+  doc: string;
+  subOptions?: SubConfigOption[];
 }
 
 /**
@@ -77,43 +96,67 @@ export const DEFAULT_KEYBINDINGS: RawKeybindings = {
 
 export const CONFIG_OPTIONS: ConfigOption[] = [
   {
-    key: 'homepage',
-    type: 'string',
-    default: 'auto',
-    doc:
-      'Page shown when no URL is given. "auto" (default) uses the searchEngine base URL; ' +
-      'any other value is used as-is.',
+    key: 'render',
+    type: 'table',
+    default: { rasterScale: 1, sharedTexture: true },
+    doc: 'Rendering options.',
+    subOptions: [
+      {
+        key: 'rasterScale',
+        type: 'number',
+        default: 1,
+        doc:
+          'Pane pixels divided by this is the bitmap Electron renders; the terminal stretches it ' +
+          'back over the same cells. 1 = 1:1 with the pane. 2 = a quarter of the pixels, upscaled 2x ' +
+          '(larger text, softer edges). Any positive number works.',
+      },
+      {
+        key: 'sharedTexture',
+        type: 'boolean',
+        default: true,
+        doc:
+          'GPU shared-texture paint path for the fallback renderer (Ghostty outside tmux). Removes ' +
+          'the CPU pixel read; gateable for comparison.',
+      },
+    ],
   },
   {
-    key: 'rasterScale',
-    type: 'number',
-    default: 1,
-    doc:
-      'Pane pixels divided by this is the bitmap Electron renders; the terminal stretches it ' +
-      'back over the same cells. 1 = 1:1 with the pane. 2 = a quarter of the pixels, upscaled 2x ' +
-      '(larger text, softer edges). Any positive number works.',
+    key: 'ui',
+    type: 'table',
+    default: { barTheme: 'reverse' },
+    doc: 'UI appearance options.',
+    subOptions: [
+      {
+        key: 'barTheme',
+        type: 'string',
+        default: 'reverse',
+        doc:
+          'Bar colour preset: reverse, none, dark, light, accent. An unknown value falls ' +
+          'back to reverse (the default look).',
+      },
+    ],
   },
   {
-    key: 'sharedTexture',
-    type: 'boolean',
-    default: true,
-    doc:
-      'GPU shared-texture paint path for the fallback renderer (Ghostty outside tmux). Removes ' +
-      'the CPU pixel read; gateable for comparison.',
-  },
-  {
-    key: 'searchEngine',
-    type: 'string',
-    default: 'https://duckduckgo.com/?q=',
-    doc: 'Search engine URL template. Use {q} for the query (URL-encoded).',
-  },
-  {
-    key: 'barTheme',
-    type: 'string',
-    default: 'reverse',
-    doc:
-      'Row-0 bar colour preset: reverse, none, dark, light, accent. An unknown value falls ' +
-      'back to reverse (the default look).',
+    key: 'browser',
+    type: 'table',
+    default: { homepage: 'auto', searchEngine: 'https://duckduckgo.com/?q=' },
+    doc: 'Browser behaviour options.',
+    subOptions: [
+      {
+        key: 'homepage',
+        type: 'string',
+        default: 'auto',
+        doc:
+          'Page shown when no URL is given. "auto" (default) uses the searchEngine base URL; ' +
+          'any other value is used as-is.',
+      },
+      {
+        key: 'searchEngine',
+        type: 'string',
+        default: 'https://duckduckgo.com/?q=',
+        doc: 'Search engine URL template. Use {q} for the query (URL-encoded).',
+      },
+    ],
   },
   {
     key: 'keybindings',
@@ -136,11 +179,22 @@ function baseUrlFromSearchEngine(se: string): string {
 export function defaultConfig(): RawConfig {
   const out: Record<string, unknown> = {};
   for (const opt of CONFIG_OPTIONS) {
-    out[opt.key] = opt.type === 'table' ? { ...(opt.default as object) } : opt.default;
+    if (opt.type === 'table' && opt.subOptions) {
+      const table: Record<string, unknown> = {};
+      for (const sub of opt.subOptions) {
+        table[sub.key] = sub.default;
+      }
+      out[opt.key] = table;
+    } else if (opt.type === 'table') {
+      out[opt.key] = { ...(opt.default as object) };
+    } else {
+      out[opt.key] = opt.default;
+    }
   }
   // Derive homepage from searchEngine when "auto" (the default).
-  if (out.homepage === 'auto') {
-    out.homepage = baseUrlFromSearchEngine(out.searchEngine as string);
+  const browser = out.browser as RawBrowserConfig;
+  if (browser.homepage === 'auto') {
+    browser.homepage = baseUrlFromSearchEngine(browser.searchEngine as string);
   }
   return out as RawConfig;
 }
@@ -169,35 +223,37 @@ export function generateToml(config: RawConfig = defaultConfig()): string {
   ];
 
   for (const opt of CONFIG_OPTIONS) {
-    if (opt.type === 'table') continue;
-    const value = (config[opt.key] as unknown) ?? opt.default;
-    lines.push(`# ${opt.doc}`);
-    lines.push(`${opt.key} = ${tomlValue(value)}`);
-    lines.push('');
-  }
-
-  for (const opt of CONFIG_OPTIONS) {
     if (opt.type !== 'table') continue;
-    const table = (config[opt.key] as RawKeybindings) ?? (opt.default as RawKeybindings);
+    const table = (config[opt.key] as Record<string, unknown>) ?? (opt.default as Record<string, unknown>);
     lines.push(`# ${opt.doc}`);
-    lines.push(`# Actions: ${Object.keys(actions).join(', ')}`);
-    lines.push('[keybindings]');
-    // Group by action: a plain TOML table cannot hold the same key twice, and
-    // one action can bind several keys (the mouse buttons share back/forward).
-    const byAction = new Map<string, string[]>();
-    for (const [key, value] of Object.entries(table)) {
-      if (typeof value === 'string') {
-        const bindings = byAction.get(value) ?? [];
-        bindings.push(key);
-        byAction.set(value, bindings);
+    if (opt.subOptions) {
+      lines.push(`[${opt.key}]`);
+      for (const sub of opt.subOptions) {
+        const value = table[sub.key] ?? sub.default;
+        lines.push(`# ${sub.doc}`);
+        lines.push(`${sub.key} = ${tomlValue(value)}`);
       }
+      lines.push('');
+    } else if (opt.key === 'keybindings') {
+      lines.push(`# Actions: ${Object.keys(actions).join(', ')}`);
+      lines.push('[keybindings]');
+      // Group by action: a plain TOML table cannot hold the same key twice, and
+      // one action can bind several keys (the mouse buttons share back/forward).
+      const byAction = new Map<string, string[]>();
+      for (const [key, value] of Object.entries(table)) {
+        if (typeof value === 'string') {
+          const bindings = byAction.get(value) ?? [];
+          bindings.push(key);
+          byAction.set(value, bindings);
+        }
+      }
+      for (const [action, bindings] of byAction) {
+        const keys = bindings.map((k) => tomlValue(k));
+        const value = bindings.length === 1 ? keys[0] : `[${keys.join(', ')}]`;
+        lines.push(`${tomlKey(action)} = ${value}`);
+      }
+      lines.push('');
     }
-    for (const [action, bindings] of byAction) {
-      const keys = bindings.map((k) => tomlValue(k));
-      const value = bindings.length === 1 ? keys[0] : `[${keys.join(', ')}]`;
-      lines.push(`${tomlKey(action)} = ${value}`);
-    }
-    lines.push('');
   }
 
   return lines.join('\n');
@@ -238,18 +294,35 @@ function normalizeKeybindings(table: RawKeybindings): Record<string, string> {
  * ./config.toml -> --config). A scalar set by a more specific layer wins;
  * keybindings merge per binding, so overriding one shortcut never unmaps the
  * rest. An explicitly empty keybindings table contributes nothing.
+ * Tables with sub-options merge per key.
  */
 export function mergeConfigs(raws: RawConfig[]): RawConfig {
   const out: Record<string, unknown> = {};
   const keys: Record<string, string> = {};
+
   for (const raw of raws) {
     for (const [key, value] of Object.entries(raw)) {
-      if (key === 'keybindings' || value === undefined) continue;
-      out[key] = value;
+      if (value === undefined) continue;
+
+      const opt = CONFIG_OPTIONS.find((o) => o.key === key);
+      if (!opt) continue;
+
+      if (opt.type === 'table' && opt.subOptions && typeof value === 'object') {
+        // Merge table with sub-options per key
+        const existing = (out[key] as Record<string, unknown>) ?? {};
+        const merged = { ...existing, ...(value as Record<string, unknown>) };
+        out[key] = merged;
+      } else if (opt.key === 'keybindings') {
+        // keybindings merge per binding
+        Object.assign(keys, normalizeKeybindings(value as RawKeybindings));
+      } else {
+        // scalar: most specific wins
+        out[key] = value;
+      }
     }
-    if (raw.keybindings !== undefined) Object.assign(keys, normalizeKeybindings(raw.keybindings));
   }
-  out.keybindings = keys;
+
+  if (Object.keys(keys).length > 0) out.keybindings = keys;
   return out as RawConfig;
 }
 
@@ -265,31 +338,61 @@ export function normalizeConfig(raw: RawConfig): NormalizedConfig {
   for (const opt of CONFIG_OPTIONS) {
     const value = raw[opt.key];
     if (value == null) {
-      out[opt.key] = opt.type === 'table' ? { ...(opt.default as object) } : opt.default;
+      if (opt.type === 'table' && opt.subOptions) {
+        const table: Record<string, unknown> = {};
+        for (const sub of opt.subOptions) {
+          table[sub.key] = sub.default;
+        }
+        out[opt.key] = table;
+      } else if (opt.type === 'table') {
+        out[opt.key] = { ...(opt.default as object) };
+      } else {
+        out[opt.key] = opt.default;
+      }
       continue;
-    }
-
-    if (opt.type !== 'table' && typeof value !== opt.type) {
-      throw new Error(`${opt.key} must be a ${opt.type}, got ${typeof value}`);
     }
 
     if (opt.type === 'table') {
       if (typeof value !== 'object') {
         throw new Error(`${opt.key} must be a table, got ${typeof value}`);
       }
-      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-        const ok =
-          typeof v === 'string' || (Array.isArray(v) && v.every((x) => typeof x === 'string'));
-        if (!ok) {
-          throw new Error(
-            `${opt.key}.${k} must be a string (a key sequence) or an array of them, got ${typeof v}`,
-          );
+      if (opt.subOptions) {
+        const table: Record<string, unknown> = {};
+        for (const sub of opt.subOptions) {
+          const subValue = (value as Record<string, unknown>)[sub.key];
+          if (subValue == null) {
+            table[sub.key] = sub.default;
+            continue;
+          }
+          if (typeof subValue !== sub.type) {
+            throw new Error(`${opt.key}.${sub.key} must be a ${sub.type}, got ${typeof subValue}`);
+          }
+          table[sub.key] = subValue;
         }
+        // Check for unknown keys in the table
+        for (const k of Object.keys(value as Record<string, unknown>)) {
+          if (!opt.subOptions.some((s) => s.key === k)) unknownKeys.push(`${opt.key}.${k}`);
+        }
+        out[opt.key] = table;
+      } else if (opt.key === 'keybindings') {
+        // Existing keybindings validation
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+          const ok =
+            typeof v === 'string' || (Array.isArray(v) && v.every((x) => typeof x === 'string'));
+          if (!ok) {
+            throw new Error(
+              `${opt.key}.${k} must be a string (a key sequence) or an array of them, got ${typeof v}`,
+            );
+          }
+        }
+        out[opt.key] = normalizeKeybindings(value as RawKeybindings);
       }
-      out[opt.key] = normalizeKeybindings(value as RawKeybindings);
       continue;
     }
 
+    if (typeof value !== opt.type) {
+      throw new Error(`${opt.key} must be a ${opt.type}, got ${typeof value}`);
+    }
     out[opt.key] = value;
   }
 
@@ -298,8 +401,9 @@ export function normalizeConfig(raw: RawConfig): NormalizedConfig {
   }
 
   // Derive homepage from searchEngine when "auto" (the default).
-  if (out.homepage === 'auto') {
-    out.homepage = baseUrlFromSearchEngine(out.searchEngine as string);
+  const browser = out.browser as RawBrowserConfig;
+  if (browser.homepage === 'auto') {
+    browser.homepage = baseUrlFromSearchEngine(browser.searchEngine as string);
   }
 
   // `out` has an entry for every declared option — that is the AwritConfig

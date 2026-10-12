@@ -45,15 +45,17 @@ let homepage = 'https://duckduckgo.com';
 // JSON (09-04 option-a); this side only reads that JSON, applies it and
 // re-reads it when it changes.
 function loadConfig(config: AwritConfig) {
-  homepage = config.homepage;
-  setRasterScale(config.rasterScale);
-  setSharedTexture(config.sharedTexture);
-  features.searchEngine = config.searchEngine;
-  if (isBarTheme(config.barTheme)) {
-    features.bar.theme = config.barTheme;
+  homepage = config.browser.homepage;
+  setRasterScale(config.render.rasterScale);
+  setSharedTexture(config.render.sharedTexture);
+  features.searchEngine = config.browser.searchEngine;
+  if (config.ui.barTheme && isBarTheme(config.ui.barTheme)) {
+    features.bar.theme = config.ui.barTheme;
   } else {
     features.bar.theme = 'reverse';
-    console_.error(`Unknown barTheme: "${config.barTheme}" (using "reverse")`);
+    if (config.ui.barTheme) {
+      console_.error(`Unknown barTheme: "${config.ui.barTheme}" (using "reverse")`);
+    }
   }
   redrawBar(); // repaint the bar immediately on a live config reload
   const { unknown } = loadKeyBindings({ keybindings: config.keybindings }, actions);
