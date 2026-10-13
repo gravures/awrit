@@ -28,10 +28,10 @@
     "node_modules",
     "dist",
     "awrit-native-rs",
-    "src/runner",
-    "src/runner/**/*",
+    "src/cli",
+    "src/cli/**/*",
     "src/**/*.test.ts",
-    "src/tty/inputTest.ts",
-    "src/tty/graphicsTest.ts"
+    "src/electron/tty/inputTest.ts",
+    "src/electron/tty/graphicsTest.ts"
   ]
 }

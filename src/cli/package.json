@@ -1,0 +1,13 @@
+{
+  "name": "cli",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit --skipLibCheck"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.2",
+    "@types/bun": "latest"
+  }
+}

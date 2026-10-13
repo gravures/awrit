@@ -15,16 +15,15 @@
   "engines": {
     "node": ">=22.11.0"
   },
-  "workspaces": [ "src/runner" ],
+  "workspaces": [ "src/cli" ],
   "scripts": {
     "test": "bun test",
     "format": "biome format --write .",
     "lint": "biome lint ./src",
     "lint-fix": "biome lint --write ./src",
     "lint-fix-unsafe": "biome lint --write --unsafe ./src",
-    "input-test": "bun run ./src/tty/inputTest.ts",
-    "gfx-test": "bun run ./src/tty/graphicsTest.ts",
-    "bump-crossterm": "git subtree pull --prefix=awrit-native-rs/crates/crossterm --squash https://github.com/crossterm-rs/crossterm master",
+    "input-test": "bun run ./src/electron/tty/inputTest.ts",
+    "gfx-test": "bun run ./src/electron/tty/graphicsTest.ts",
     "typecheck": "tsc --noEmit --skipLibCheck"
   },
   "dependencies": {

@@ -123,8 +123,8 @@ run = [
   "rm -rf ./awrit-native-rs/crates/crossterm/target 2>/dev/null || :",
   "rm -rf ./awrit-native-rs/crates/crossterm/Cargo.lock 2>/dev/null || :",
   "rm -rf ./awrit-native-rs/crates/bgra-to-rgba/target 2>/dev/null || :",
-  # runner
-  "rm -rf ./src/runner/node_modules 2>/dev/null || :",
+  # cli
+  "rm -rf ./src/cli/node_modules 2>/dev/null || :",
 ]
 
 [tasks."setup:zero"]
@@ -207,11 +207,11 @@ run = "bun test"
 
 [tasks."test:input"]
 description = "run interactive input test"
-run = "bun run ./src/tty/inputTest.ts"
+run = "bun run ./src/electron/tty/inputTest.ts"
 
 [tasks."test:gfx"]
 description = "run graphics test"
-run = "bun run ./src/tty/graphicsTest.ts"
+run = "bun run ./src/electron/tty/graphicsTest.ts"
 
 
 ##########################################################
@@ -276,7 +276,7 @@ run = "lcov_cobertura lcov.info && genbadge coverage -i coverage.xml -o assets/c
 usage = '''
 arg "[args]" var=#true help="any arguments to provide to awrit"
 '''
-run = "bun run {{ config_root }}/src/runner {{ usage.args | join(sep=' ') }}"
+run = "bun run {{ config_root }}/src/cli {{ usage.args | join(sep=' ') }}"
 
 ##########################################################
 # Release
@@ -323,10 +323,10 @@ run = [
 ]
 
 [tasks.bundle_awrit]
-description = "compile the runner into dist/awrit"
+description = "compile the cli into dist/awrit"
 hide = true
 run = '''
-bun build --compile src/runner/index.ts --outfile dist/awrit \
+bun build --compile src/cli/index.ts --outfile dist/awrit \
   --external electron --external '*.node'
 '''
 
